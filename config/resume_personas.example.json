@@ -1,0 +1,105 @@
+{
+  "_comment": "Career Command Center — resume personas. Copy this file to config/resume_personas.json. Each persona maps to ONE resume PDF you keep in the resumes/ folder. The 'code' is the short identifier used in the UI (e.g. DA, BA, DS, PM). Add as many personas as you have resume variants. Triggers help the analyzer pick the right persona for a JD.",
+  "default_code": "DA",
+  "personas": [
+    {
+      "code": "DA",
+      "label": "Data Analyst",
+      "filename": "data_analyst_resume.pdf",
+      "persona_voice": "Data Architect & Automation Specialist",
+      "core_stack": ["SQL", "Python", "Snowflake", "ETL/ELT", "BI tools"],
+      "lead_metrics": "Cite your strongest 2-3 quantified wins from the data-analyst variant of your resume here. Example: 250K+ daily records processed, 60% latency reduction, 20% manual error elimination.",
+      "rationale_fallback": "The Data Analyst persona leads with pipeline automation and BI reporting throughput — best fit for SQL- and ETL-heavy roles.",
+      "triggers": [
+        "data analyst",
+        "ETL",
+        "data pipeline",
+        "Snowflake",
+        "dbt",
+        "Airflow",
+        "reporting automation",
+        "BI engineer",
+        "analytics engineer"
+      ]
+    },
+    {
+      "code": "BA",
+      "label": "Business Analyst",
+      "filename": "business_analyst_resume.pdf",
+      "persona_voice": "Strategic Liaison & Intelligence Architect",
+      "core_stack": ["SQL", "Power BI", "Requirements gathering", "UAT", "Stakeholder management"],
+      "lead_metrics": "Cite your strongest 2-3 quantified wins from the business-analyst variant of your resume here. Example: 15+ requirements unified into a single dashboard; 35% operational-efficiency increase.",
+      "rationale_fallback": "The Business Analyst persona leads with stakeholder translation and dashboard storytelling — best fit for cross-functional, requirements-heavy roles.",
+      "triggers": [
+        "business analyst",
+        "business systems analyst",
+        "requirements gathering",
+        "UAT",
+        "stakeholder management",
+        "executive reporting",
+        "process improvement"
+      ]
+    },
+    {
+      "code": "DS",
+      "label": "Data Scientist",
+      "filename": "data_scientist_resume.pdf",
+      "persona_voice": "Engine Builder & Predictive Strategist",
+      "core_stack": ["Python", "Scikit-learn", "PyTorch", "AWS/Azure", "Feature engineering"],
+      "lead_metrics": "Cite your strongest 2-3 quantified wins from the data-scientist variant of your resume here. Example: 25% precision improvement on a recommender model; end-to-end ML deployment on AWS.",
+      "rationale_fallback": "The Data Scientist persona leads with ML-in-production wins — best fit for modeling-heavy, research-flavored roles.",
+      "triggers": [
+        "data scientist",
+        "machine learning engineer",
+        "ML engineer",
+        "applied scientist",
+        "predictive model",
+        "PyTorch",
+        "TensorFlow",
+        "Scikit-learn",
+        "feature engineering",
+        "forecasting",
+        "regression",
+        "classification",
+        "clustering",
+        "computer vision"
+      ]
+    },
+    {
+      "code": "AI",
+      "label": "Data & AI Professional",
+      "filename": "ai_professional_resume.pdf",
+      "persona_voice": "AI-Native Engineer & Strategic Liaison",
+      "core_stack": ["LLM Orchestration", "Prompt Engineering", "AI Agents", "Python", "SQL", "BI Tools"],
+      "lead_metrics": "Cite your strongest 2-3 quantified wins from the AI-professional variant of your resume here. Example: 50% manual-scoping reduction via multi-provider LLM orchestration; 40% dashboard dev-time cut.",
+      "rationale_fallback": "The Data & AI Professional persona leads with LLM orchestration and agentic workflow automation — best fit for AI-forward teams.",
+      "triggers": [
+        "AI",
+        "AI tools",
+        "LLM",
+        "GPT",
+        "Gemini",
+        "Claude",
+        "Copilot",
+        "ChatGPT",
+        "Cursor",
+        "agent",
+        "agentic",
+        "prompt engineering",
+        "RAG",
+        "vector database",
+        "embeddings",
+        "generative AI",
+        "GenAI",
+        "fine-tuning"
+      ]
+    }
+  ],
+  "selection_priority": [
+    "AI",
+    "DS",
+    "DA",
+    "BA"
+  ],
+  "selection_notes": "When multiple personas match a JD, the first persona in 'selection_priority' wins. Override this list if your role mix is different (e.g. ['DA', 'BA', 'DS', 'AI'])."
+}

@@ -1,0 +1,732 @@
+:root {
+    --bg-color: #0b0f19;
+    --panel-bg: rgba(20, 25, 40, 0.45);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --gold: #d4af37;
+    --gold-glow: rgba(212, 175, 55, 0.4);
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --input-bg: rgba(15, 23, 42, 0.6);
+    --input-border: rgba(212, 175, 55, 0.2);
+    --input-focus: rgba(212, 175, 55, 0.6);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Outfit', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+}
+
+.bg-shape {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+    z-index: -1;
+    animation: float 20s infinite ease-in-out;
+}
+.shape-1 {
+    width: 500px;
+    height: 500px;
+    background: rgba(212, 175, 55, 0.15);
+    top: -100px;
+    left: -100px;
+}
+.shape-2 {
+    width: 600px;
+    height: 400px;
+    background: rgba(59, 130, 246, 0.1);
+    bottom: -150px;
+    right: -100px;
+    animation-delay: -5s;
+}
+.shape-3 {
+    width: 300px;
+    height: 300px;
+    background: rgba(139, 92, 246, 0.1);
+    top: 40%;
+    left: 40%;
+    animation-delay: -10s;
+}
+
+@keyframes float {
+    0%, 100% { transform: translate(0, 0); }
+    33% { transform: translate(30px, -50px); }
+    66% { transform: translate(-20px, 40px); }
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 3rem;
+    padding-top: 2rem;
+}
+
+header h1 {
+    font-size: 3rem;
+    font-weight: 700;
+    background: linear-gradient(to right, #fff, var(--gold));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.5rem;
+}
+
+header p {
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.dashboard {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 2rem;
+    flex: 1;
+}
+
+.glass {
+    background: var(--panel-bg);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--panel-border);
+    border-radius: 24px;
+    padding: 2rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.panel h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    font-weight: 600;
+    color: var(--gold);
+    display: flex;
+    align-items: center;
+}
+.panel h2::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, var(--gold-glow), transparent);
+    margin-left: 1rem;
+}
+
+.quota-health {
+    margin-top: -0.8rem;
+    margin-bottom: 1rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(15, 23, 42, 0.6);
+    color: #cbd5e1;
+    font-size: 0.85rem;
+}
+.quota-health.warn {
+    border-color: rgba(245, 158, 11, 0.45);
+    background: rgba(120, 53, 15, 0.22);
+    color: #fde68a;
+}
+.quota-health.danger {
+    border-color: rgba(239, 68, 68, 0.5);
+    background: rgba(127, 29, 29, 0.28);
+    color: #fecaca;
+}
+
+.fit-container {
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    gap: 1.5rem;
+}
+
+.fit-score-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    background: conic-gradient(var(--gold) 0%, transparent 0%);
+    position: relative;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+}
+
+.fit-score-box::before {
+    content: "";
+    position: absolute;
+    width: 76px;
+    height: 76px;
+    background: var(--bg-color);
+    border-radius: 50%;
+}
+
+#fitScoreNum {
+    position: relative;
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: #fff;
+    z-index: 1;
+}
+
+.fit-label {
+    position: relative;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--gold);
+    z-index: 1;
+    letter-spacing: 1px;
+}
+
+.fit-details h3 {
+    font-size: 1.2rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Provenance pill — shows which AI actually produced the analysis so the
+   user can tell at a glance whether Groq, Gemini, Cerebras, GitHub, or
+   Ollama won the provider chain, plus the latency. Helps answer "why
+   does this look off?" and "which model did this?" without opening logs. */
+.analysis-provenance {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+    line-height: 1.2;
+    flex-wrap: wrap;
+}
+.analysis-provenance.hidden { display: none; }
+.analysis-provenance .prov-label {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    opacity: 0.6;
+}
+.prov-chip {
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    color: #c7d2fe;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.prov-chip.prov-chip-muted {
+    background: rgba(148, 163, 184, 0.1);
+    border-color: rgba(148, 163, 184, 0.3);
+    color: #cbd5e1;
+    font-weight: 400;
+}
+
+/* ------------------------------------------------------------------
+ * Session persistence UI
+ * Shown when the browser has a saved session from an earlier run;
+ * lets the user wipe it and start fresh.
+ * ------------------------------------------------------------------ */
+.step1-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.clear-session-btn {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    white-space: nowrap;
+}
+.clear-session-btn:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fecaca;
+    transform: translateY(-1px);
+}
+.session-restored-banner {
+    margin: 0.6rem 0 0.9rem 0;
+    padding: 0.5rem 0.75rem;
+    background: rgba(20, 184, 166, 0.12);
+    border: 1px solid rgba(20, 184, 166, 0.35);
+    color: #5eead4;
+    font-size: 0.8rem;
+    border-radius: 8px;
+    transition: opacity 0.35s ease;
+}
+.session-restored-banner.hidden { display: none; }
+
+/* Strategic assessment cards */
+.strategic-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.strategy-card-wide {
+    grid-column: 1 / -1;
+}
+
+.strategy-card {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 1.2rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.strategy-card h4 {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 0.5rem;
+}
+
+.status-badge {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+}
+
+.strategy-card p {
+    font-size: 0.9rem;
+    color: #cbd5e1;
+    line-height: 1.5;
+}
+
+/* Recommended Resume pick */
+.resume-pick-container {
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.08), rgba(59, 130, 246, 0.08));
+    border: 1px solid rgba(168, 85, 247, 0.35);
+    border-radius: 14px;
+    padding: 1.4rem 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 10px 30px -18px rgba(168, 85, 247, 0.35);
+}
+
+.resume-pick-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.resume-pick-eyebrow {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-weight: 600;
+}
+
+.resume-pick-badge {
+    font-family: 'Fira Code', 'SF Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #e9d5ff;
+    background: rgba(168, 85, 247, 0.25);
+    border: 1px solid rgba(168, 85, 247, 0.5);
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+}
+
+.resume-pick-name {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin-bottom: 0.6rem;
+    letter-spacing: 0.3px;
+}
+
+.resume-pick-rationale {
+    font-size: 0.95rem;
+    color: #cbd5e1;
+    line-height: 1.55;
+    margin: 0;
+}
+
+.resume-pick-hint {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.75rem;
+    margin-bottom: 0;
+    opacity: 0.85;
+}
+
+/* Verdict Table */
+.verdict-table-container {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.verdict-table-container h3 {
+    color: var(--gold);
+    font-size: 1.1rem;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: center;
+}
+
+.verdict-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.verdict-row:last-child {
+    border-bottom: none;
+}
+
+.verdict-label {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.verdict-value {
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: right;
+    max-width: 60%;
+}
+
+.highlight-row {
+    background: rgba(212, 175, 55, 0.1);
+    margin: 0.5rem -1.5rem -1.5rem -1.5rem;
+    padding: 1rem 1.5rem;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+.highlight-row .verdict-value {
+    color: var(--gold);
+}
+
+
+.persona-box {
+    background: rgba(139, 92, 246, 0.1);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 12px;
+    padding: 1rem;
+    color: #c4b5fd;
+    font-weight: 500;
+    font-size: 1.1rem;
+}
+
+.search-grid {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.draft-actions {
+    display: flex;
+    gap: 0.8rem;
+}
+
+.draft-actions button {
+    flex: 1;
+}
+
+.linkedin-btn {
+    flex: 1;
+    background: #0f172a;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: white;
+    text-align: center;
+    text-decoration: none;
+    padding: 0.8rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+.linkedin-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+}
+
+/* Affinity / alumni search button (legacy class name kept for backwards compat). */
+.drexel-btn:hover, .alumni-btn:hover { border-color: #073686; box-shadow: 0 4px 15px rgba(7, 54, 134, 0.5); }
+.manager-btn:hover { border-color: #10b981; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); }
+
+.note-container {
+    position: relative;
+    width: 100%;
+}
+.copy-btn {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    width: auto;
+    padding: 0.4rem 0.8rem;
+    background: #334155;
+    color: white;
+    border-radius: 6px;
+    font-size: 0.8rem;
+}
+.copy-btn:hover { background: #475569; }
+
+
+.form-group {
+    margin-bottom: 1.5rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.form-group label {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+textarea, input, select {
+    width: 100%;
+    background: var(--input-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 1rem;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+textarea:focus, input:focus, select:focus {
+    outline: none;
+    border-color: var(--input-focus);
+    box-shadow: 0 0 15px rgba(212, 175, 55, 0.15);
+}
+
+textarea {
+    resize: none;
+}
+
+#jd {
+    height: 400px;
+}
+
+#body {
+    height: 300px;
+}
+
+.details-row {
+    display: flex;
+    gap: 1rem;
+}
+
+.half { flex: 1; }
+.third { flex: 1; }
+.full { flex: 1; width: 100%; }
+
+button {
+    width: 100%;
+    padding: 1rem 2rem;
+    border: none;
+    border-radius: 12px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-family: inherit;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #d4af37, #aa8529);
+    color: #000;
+    box-shadow: 0 10px 20px -10px var(--gold-glow);
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 25px -10px var(--gold-glow);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.action-footer {
+    margin-top: 2rem;
+}
+
+/* Step-4 "Attach resume" toggle — sits right above the Send button so the
+   user can override the analyzer's resume pick at the very last moment. */
+.attach-row {
+    margin-top: 1.25rem;
+    padding: 0.9rem 1rem;
+    background: rgba(99, 102, 241, 0.06);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 10px;
+}
+.attach-row label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--panel-muted, #94a3b8);
+    margin-bottom: 0.5rem;
+    display: block;
+}
+.attach-select-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.attach-select-wrap select {
+    width: 100%;
+    max-width: 420px;
+}
+.attach-hint {
+    font-size: 0.82rem;
+    opacity: 0.8;
+    line-height: 1.35;
+}
+
+.btn-success {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: #fff;
+    box-shadow: 0 10px 20px -10px rgba(16, 185, 129, 0.4);
+}
+
+.btn-success:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 25px -10px rgba(16, 185, 129, 0.5);
+}
+
+.hidden { display: none !important; }
+
+.agent-chat-log {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 0.8rem;
+    max-height: 240px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.agent-msg {
+    border-radius: 10px;
+    padding: 0.7rem 0.9rem;
+    line-height: 1.4;
+    font-size: 0.92rem;
+}
+
+.agent-msg.user {
+    margin-left: auto;
+    max-width: 85%;
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.agent-msg.assistant {
+    margin-right: auto;
+    max-width: 92%;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.agent-controls textarea {
+    min-height: 88px;
+}
+
+/* States */
+.center-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 200px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--panel-border);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 1rem;
+}
+
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
+.fade-in {
+    animation: fadeIn 0.5s ease forwards;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Toast */
+.toast {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    background: rgba(16, 185, 129, 0.9);
+    color: white;
+    padding: 1rem 2rem;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    z-index: 1000;
+    animation: slideUp 0.3s ease forwards;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+@media (max-width: 1024px) {
+    .dashboard { grid-template-columns: 1fr; }
+    .strategic-grid { grid-template-columns: 1fr; }
+    .search-grid { flex-direction: column; }
+    .draft-actions { flex-direction: column; }
+    .details-row { flex-direction: column; gap: 0; }
+}

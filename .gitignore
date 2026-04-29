@@ -1,0 +1,90 @@
+# =============================================================================
+# Career Command Center — .gitignore
+# Keeps local secrets, runtime artifacts, generated files, and editor-local
+# metadata out of the repository so this project stays safe to publish.
+# =============================================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+develop-eggs/
+.installed.cfg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Secrets / environment ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# --- User-private profile / persona data ---
+# Each user creates their own from the .example.json siblings.
+config/profile.json
+config/resume_personas.json
+config/app_settings.json
+
+# --- User-private resume PDFs ---
+# Drop your own PDFs into resumes/. Only the README placeholder is committed.
+resumes/*.pdf
+resumes/*.PDF
+# Catch-all: any PDF anywhere (resumes, generated cover letters, etc.).
+# If you intentionally want to commit a PDF (e.g. a logo), un-ignore it
+# explicitly with `!path/to/file.pdf` below this line.
+*.pdf
+*.PDF
+
+# --- Runtime data files (auto-generated) ---
+data/job_tracker.csv
+data/ai_usage_log.csv
+data/scheduled_emails.json
+# Legacy paths from older versions of the project — keep them ignored too.
+Aaradhya_Job_Tracker.csv
+AI_Usage_Log.csv
+scheduled_emails.json
+
+# --- Generated cover letters / outputs ---
+output/
+exports/
+Cover_Letter_*.pdf
+Cover_Letter_*.docx
+
+# --- Editor / IDE / OS junk ---
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+# Ad-hoc developer scratch scripts (e.g. local model probes). Safe to keep
+# out of the public repo since they often contain provider-specific details.
+test_models.py
+
+# --- Test / coverage caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Personal notes (legacy local-only files) ---
+Google_Pro_Career_Automation_Ideas.txt
+Resume_Tailoring_Tool_Plan.txt

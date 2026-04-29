@@ -1,0 +1,76 @@
+{
+  "_comment": "Career Command Center — candidate profile. Copy this file to config/profile.json and fill in your own details. The app loads profile.json (preferred) and falls back to this example only if profile.json is missing.",
+  "candidate": {
+    "full_name": "Your Full Name",
+    "preferred_name": "Your First Name",
+    "headline": "Short positioning headline (e.g. 'MS Business Analytics candidate focused on Python + SQL pipelines')",
+    "location": "City, State",
+    "open_to_relocation": true,
+    "work_authorization": "Describe your work authorization in plain language (e.g. 'STEM OPT, no immediate H-1B sponsorship needed.' or 'US Citizen.' or 'EU Blue Card.'). The app cites this verbatim when assessing JD sponsorship requirements.",
+    "links": {
+      "portfolio": "https://your-portfolio.example.com",
+      "linkedin": "linkedin.com/in/your-handle",
+      "github": ""
+    },
+    "signoff_name": "Your Full Name"
+  },
+  "education": [
+    {
+      "level": "graduate",
+      "degree": "MS in <Your Field>",
+      "institution": "Your School",
+      "graduation": "Expected Jun 2026",
+      "gpa": "Optional"
+    },
+    {
+      "level": "undergraduate",
+      "degree": "Bachelor of <Your Field>",
+      "institution": "Your Undergrad School",
+      "graduation": "Jun 2024",
+      "exact_phrasing_required": "Use exactly this phrasing in cover letters / emails — never substitute a different degree title."
+    }
+  ],
+  "networking": {
+    "_comment": "Optional. If you want a 'Find alumni' search button, fill in your school slug + display label. Set 'enable_alumni_search' to false to hide that button.",
+    "enable_alumni_search": false,
+    "alumni_school_slug": "your-school",
+    "alumni_button_label": "Alumni Search",
+    "alumni_emoji": ""
+  },
+  "voice": {
+    "_comment": "Phrases the user actually uses to describe themselves. The model will be encouraged to lean on these naturally.",
+    "signature_phrases": [
+      "Single Source of Truth",
+      "Zero-Defect mindset"
+    ],
+    "banned_phrases": [
+      "I hope this finds you well",
+      "pick your brain",
+      "synergy",
+      "circle back"
+    ]
+  },
+  "achievements": [
+    {
+      "label": "Example: Pipeline automation",
+      "description": "Architected ETL pipelines processing 250K+ daily records using Python and Snowflake; reduced system latency by 60%.",
+      "tags": ["data", "etl", "snowflake", "python"]
+    },
+    {
+      "label": "Example: Stakeholder translation",
+      "description": "Translated 15+ business requirements into a unified Power BI dashboard; led UAT with non-technical stakeholders.",
+      "tags": ["business-analyst", "power-bi", "stakeholder"]
+    }
+  ],
+  "ai_tools_experience": {
+    "_comment": "Optional. Used when a JD mentions LLMs / AI tools / agentic workflows. Leave 'has_experience' false to skip these claims entirely.",
+    "has_experience": false,
+    "summary": "Hands-on with multi-provider LLM orchestration (Gemini, Groq, Ollama), prompt engineering for strict-JSON outputs, and agentic workflow tools like Cursor.",
+    "specific_facts": [
+      "Built a multi-provider AI agent system that chains LLM providers with failover, rate-limiting, and JSON-schema validation.",
+      "Daily user of an AI-native code editor for agentic pair-programming."
+    ]
+  },
+  "sponsorship_baseline": "Used as the candidate-side baseline when grading sponsorship in JDs. Plain language only; the analyzer will compare this against the JD requirements.",
+  "experience_baseline": "Plain-language baseline of total YOE + program. Example: 'Roughly 2 years of combined work + internships, plus an MS in Business Analytics in progress.' The analyzer compares this against the JD's required years."
+}

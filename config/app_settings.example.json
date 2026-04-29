@@ -1,0 +1,27 @@
+{
+  "_comment": "Career Command Center — app settings. Copy this file to config/app_settings.json. Most projects can leave the defaults alone.",
+  "features": {
+    "enable_followup_agent": true,
+    "enable_email_sending": true,
+    "enable_email_scheduling": true,
+    "enable_alumni_search_button": false
+  },
+  "ui": {
+    "app_title": "Career Command Center",
+    "app_subtitle": "AI-Powered Job Fit & Outreach Engine",
+    "default_email_send_time_hour_local": 8
+  },
+  "limits": {
+    "daily_analyze_soft_cap": 30,
+    "daily_analyze_hard_cap": 45,
+    "connection_note_max_chars": 300,
+    "email_body_min_words": 140,
+    "email_body_max_words": 230,
+    "cover_letter_min_words": 320,
+    "cover_letter_max_words": 450
+  },
+  "scheduler": {
+    "poll_seconds": 20,
+    "send_at_hour_local": 8
+  }
+}

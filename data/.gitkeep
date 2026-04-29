@@ -1,0 +1,2 @@
+# This file exists only so the empty data/ directory is tracked by git.
+# The app writes runtime CSV/JSON files here at runtime; those files are gitignored.

@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_title }} - Strategic Assessment</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="bg-shape shape-1"></div>
+    <div class="bg-shape shape-2"></div>
+    <div class="bg-shape shape-3"></div>
+
+    <div class="container">
+        <header>
+            <h1>{{ app_title }}</h1>
+            <p>{{ app_subtitle }}</p>
+        </header>
+
+        <main class="dashboard">
+            <!-- Left Panel: Job Input -->
+            <div class="panel input-panel glass">
+                <div class="step1-header">
+                    <h2>Step 1: Application Source</h2>
+                    <button id="clearSessionBtn" class="clear-session-btn" title="Wipe the saved JD, drafts, and analysis from browser storage and start fresh.">🗑 Clear session</button>
+                </div>
+                <!-- Auto-restored when the user reopens / refreshes; fades after 6s. -->
+                <div id="sessionRestoredBanner" class="session-restored-banner hidden">Session restored.</div>
+                <div class="form-group">
+                    <label for="jd">Job Description (Add Company name at the very top if ambiguous)</label>
+                    <textarea id="jd" placeholder="Paste the full job description here..."></textarea>
+                </div>
+                <button id="analyzeBtn" class="btn-primary">Deep Strategic Analysis</button>
+                <!-- Escape hatch: if analysis is hanging or the user already knows
+                     the company/role and just wants to send outreach, skip Step 2
+                     entirely and jump to Step 3 (People Strategy). -->
+                <button id="jumpToOutreachBtnStep1" class="btn-secondary" style="margin-top:0.6rem; background: linear-gradient(135deg, #14b8a6, #0d9488); color: #ffffff; border: none; padding: 0.7rem 1rem; border-radius: 10px; font-weight: 600; cursor: pointer; width: 100%; box-shadow: 0 10px 20px -10px rgba(20, 184, 166, 0.4);">🚀 Skip to Outreach Strategy</button>
+                <p style="margin-top:0.45rem; font-size:0.75rem; opacity:0.65; text-align:center;">Use this when analysis is slow or you already know the company/contact.</p>
+            </div>
+
+            <!-- Right Panel: Execution -->
+            <div class="panel output-panel glass">
+                <h2>Step 2: AI Execution Strategy</h2>
+                <div id="quotaHealth" class="quota-health">Usage monitor loading...</div>
+                
+                <div id="initial-state" class="center-state">
+                    <p>Paste a job description to calculate your Deep Fit Score and identify targets.</p>
+                </div>
+
+                <div id="loading" class="center-state hidden">
+                    <div class="spinner"></div>
+                    <p id="loadingText">Running strategic assessment (experience, stack, domain, pay)...</p>
+                </div>
+
+                <!-- Step 2: Fit Analysis Only -->
+                <div id="analysis-step" class="hidden fade-in">
+                    
+                    <div class="fit-container">
+                        <div class="fit-score-box">
+                            <span id="fitScoreNum">0%</span>
+                            <span class="fit-label">Match</span>
+                        </div>
+                        <div class="fit-details">
+                            <h3 id="extractedRole">Role at Company</h3>
+                            <p class="fit-reason-text">Deep Analysis Complete. Review Assessment Below.</p>
+                            <div id="analysisProvenance" class="analysis-provenance hidden">
+                                <span class="prov-label">Analyzed by</span>
+                                <span id="analysisProviderChip" class="prov-chip">—</span>
+                                <span id="analysisLatencyChip" class="prov-chip prov-chip-muted">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Strategic 5-Part Cards (experience + domain gaps surfaced explicitly) -->
+                    <div class="strategic-grid">
+                        <div class="strategy-card">
+                            <h4>1. Sponsorship & Legal</h4>
+                            <span class="status-badge" id="sponsorshipStatus">--</span>
+                            <p id="sponsorshipDetails">...</p>
+                        </div>
+                        <div class="strategy-card">
+                            <h4>2. Experience vs JD</h4>
+                            <span class="status-badge" id="experienceStatus">--</span>
+                            <p id="experienceDetails">...</p>
+                        </div>
+                        <div class="strategy-card">
+                            <h4>3. Technical Alignment</h4>
+                            <span class="status-badge" id="technicalStatus">--</span>
+                            <p id="technicalDetails">...</p>
+                        </div>
+                        <div class="strategy-card">
+                            <h4>4. Domain & Specialty Gap</h4>
+                            <span class="status-badge" id="domainStatus">--</span>
+                            <p id="domainDetails">...</p>
+                        </div>
+                        <div class="strategy-card strategy-card-wide">
+                            <h4>5. Location & Pay</h4>
+                            <span class="status-badge" id="locationStatus">--</span>
+                            <p id="locationDetails">...</p>
+                        </div>
+                    </div>
+
+                    <!-- Recommended Resume -->
+                    <div class="resume-pick-container">
+                        <div class="resume-pick-head">
+                            <span class="resume-pick-eyebrow">Recommended resume for this role</span>
+                            <span class="resume-pick-badge" id="resumePickBadge">--</span>
+                        </div>
+                        <div class="resume-pick-name" id="resumePickName">Analyzing persona fit...</div>
+                        <p class="resume-pick-rationale" id="resumePickRationale">The model will explain which of your configured resumes best matches this JD and why.</p>
+                        <p class="resume-pick-hint">This selection is pre-loaded into Step 3 ("Optimum persona"). You can override it there before drafting.</p>
+                    </div>
+
+                    <!-- Strategic Verdict Table -->
+                    <div class="verdict-table-container">
+                        <h3>Strategic Verdict</h3>
+                        <div class="verdict-row">
+                            <span class="verdict-label">Experience / Seniority</span>
+                            <span class="verdict-value" id="verdictExperience">--/10</span>
+                        </div>
+                        <div class="verdict-row">
+                            <span class="verdict-label">Technical Fit</span>
+                            <span class="verdict-value" id="verdictTech">--/10</span>
+                        </div>
+                        <div class="verdict-row">
+                            <span class="verdict-label">Growth Fit</span>
+                            <span class="verdict-value" id="verdictGrowth">--/10</span>
+                        </div>
+                        <div class="verdict-row highlight-row">
+                            <span class="verdict-label">Recommendation</span>
+                            <span class="verdict-value" id="verdictRec">--</span>
+                        </div>
+                    </div>
+
+                    <!-- Quick-jump to Outreach (sits right under the verdict so the
+                         user can skip past the optional cover-letter section without scrolling) -->
+                    <button id="jumpToOutreachBtn" class="btn-primary" style="margin-top:0.9rem; background: linear-gradient(135deg, #14b8a6, #0d9488); box-shadow: 0 10px 20px -10px rgba(20, 184, 166, 0.4);">🚀 Jump to Outreach Strategy</button>
+
+                    <!-- Optional: Cover Letter (on-demand) -->
+                    <div class="cover-letter-actions" style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
+                        <label for="coverToneSelect" style="font-size:0.9rem; opacity:0.85;">Tone</label>
+                        <select id="coverToneSelect" style="padding: 0.5rem 0.75rem;">
+                            <option value="professional">Professional</option>
+                            <option value="enthusiastic">Enthusiastic</option>
+                            <option value="concise">Concise / Senior</option>
+                        </select>
+                        <button id="chooseCoverPersonaBtn" class="btn-primary" style="background: linear-gradient(135deg, #64748b, #475569); box-shadow: 0 10px 20px -10px rgba(71, 85, 105, 0.4);">🎯 Choose Resume Persona</button>
+                        <button id="coverLetterBtn" class="btn-primary" style="background: linear-gradient(135deg, #a855f7, #7c3aed); box-shadow: 0 10px 20px -10px rgba(168, 85, 247, 0.4);">✍️ Generate Cover Letter (optional)</button>
+                    </div>
+
+                    <div id="coverLetterLoading" class="center-state hidden" style="min-height: 60px; margin-top: 0.75rem;">
+                        <div class="spinner" style="width:22px; height:22px;"></div>
+                        <p style="margin-top:0.4rem; font-size:0.85rem; opacity:0.8;">Drafting a tailored cover letter...</p>
+                    </div>
+
+                    <div id="coverLetterSection" class="hidden fade-in" style="margin-top: 1rem;">
+                        <div class="form-group">
+                            <label for="coverLetterText">Cover Letter (editable, ~280–380 words)</label>
+                            <div class="note-container">
+                                <textarea id="coverLetterText" style="height:260px;"></textarea>
+                                <button id="copyCoverBtn" class="copy-btn">📋 Copy</button>
+                            </div>
+                            <div style="margin-top: 0.6rem; display:flex; gap:0.6rem; flex-wrap: wrap;">
+                                <button id="downloadCoverBtn" class="btn-primary" style="background: linear-gradient(135deg, #0ea5e9, #0284c7); box-shadow: 0 10px 20px -10px rgba(14, 165, 233, 0.4);">⬇️ Download .pdf</button>
+                                <button id="downloadCoverDocxBtn" class="btn-primary" style="background: linear-gradient(135deg, #2563eb, #1d4ed8); box-shadow: 0 10px 20px -10px rgba(37, 99, 235, 0.4);">📝 Word (.docx)</button>
+                                <button id="regenerateCoverBtn" class="btn-primary" style="background: linear-gradient(135deg, #64748b, #475569); box-shadow: 0 10px 20px -10px rgba(100, 116, 139, 0.4);">🔁 Regenerate</button>
+                                <span id="coverProvider" style="font-size:0.8rem; opacity:0.7; align-self:center;"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Transition to People Step -->
+                    <button id="moveToPeopleBtn" class="btn-primary" style="margin-top:1rem; background: linear-gradient(135deg, #3b82f6, #2563eb); box-shadow: 0 10px 20px -10px rgba(59, 130, 246, 0.4);">Satisfied? Transition to Outreach Strategy</button>
+                </div>
+
+                <!-- Step 3: People Strategy -->
+                <div id="people-step" class="hidden fade-in" style="margin-top: 2rem; border-top: 1px solid var(--panel-border); padding-top: 2rem;">
+                    <h2>Step 3: People Strategy & Target Acquisition</h2>
+
+                    <div class="details-row" style="margin-top: 1.5rem;">
+                        <div class="form-group half">
+                            <label for="company">Company</label>
+                            <input type="text" id="company" />
+                        </div>
+                        <div class="form-group half">
+                            <label for="position">Identified Role</label>
+                            <input type="text" id="position" />
+                        </div>
+                    </div>
+
+                    <div class="details-row">
+                         <div class="form-group full">
+                            <label>Identified Target Persona / Target Name</label>
+                            <div class="persona-box" id="targetPersona">Searching for ideal contact...</div>
+                            
+                            <!-- LinkedIn search shortcuts. The alumni button is
+                                 only rendered if the user enabled it in their
+                                 profile.json (alumni_search_enabled = true). -->
+                            <div class="search-grid">
+                                {% if alumni_search_enabled %}
+                                <a id="searchAlumniBtn" href="#" target="_blank" class="linkedin-btn drexel-btn">{{ alumni_button_emoji }} {{ alumni_button_label }}</a>
+                                {% endif %}
+                                <a id="searchRecruiterBtn" href="#" target="_blank" class="linkedin-btn">🎯 Recruiters + TA</a>
+                                <a id="searchManagerBtn" href="#" target="_blank" class="linkedin-btn manager-btn">👔 Hiring Managers+</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="details-row" style="margin-top: 1rem;">
+                        <div class="form-group full">
+                            <label for="contactName">Target person's name (required — used to craft your LinkedIn note)</label>
+                            <input type="text" id="contactName" placeholder="e.g. Jane Doe (as on LinkedIn)" />
+                        </div>
+                    </div>
+                    <div class="details-row">
+                        <div class="form-group half">
+                            <label for="targetEmail">Target inbox (only if sending email later)</label>
+                            <input type="email" id="targetEmail" placeholder="Optional until you use Send" />
+                        </div>
+                        <div class="form-group half">
+                            <label for="resumeSelect">Optimum persona</label>
+                            <select id="resumeSelect">
+                                <!-- Populated dynamically from /api/resumes on page load. -->
+                            </select>
+                        </div>
+                    </div>
+
+                    <p class="step-hint" style="margin-top: 0.75rem; font-size: 0.9rem; opacity: 0.85;">Use the fast note-only action when you just need LinkedIn copy. Use the full draft action when you want both connection note + email together.</p>
+                    <div class="draft-actions">
+                        <button id="chooseDraftPersonaBtn" class="btn-primary" style="margin-top:1rem; background: linear-gradient(135deg, #64748b, #475569); box-shadow: 0 10px 20px -10px rgba(71, 85, 105, 0.4);">🎯 Choose Resume Persona for Drafting</button>
+                        <button id="draftNoteBtn" class="btn-primary" style="margin-top:1rem;">Quick Connection Note Only</button>
+                        <button id="draftBtn" class="btn-primary" style="margin-top:1rem; background: linear-gradient(135deg, #3b82f6, #2563eb); box-shadow: 0 10px 20px -10px rgba(59, 130, 246, 0.4);">Draft Email + Connection Note</button>
+                    </div>
+                    <div id="draftLoading" class="center-state hidden" style="min-height: 100px;">
+                        <div class="spinner" style="width:25px; height:25px;"></div>
+                    </div>
+                </div>
+                    
+                <!-- Step 4: Editing & Sending -->
+                <div id="draft-step" class="hidden fade-in" style="margin-top: 2rem; border-top: 1px solid var(--panel-border); padding-top: 2rem;">
+                    <h2>Step 4: Connection note, then optional email</h2>
+                    <p class="step-hint" style="font-size: 0.9rem; opacity: 0.85; margin-bottom: 1rem;">Copy your LinkedIn note below. Add a target email only when you are ready to send; Send still requires subject, body, and email.</p>
+
+                    <div class="form-group">
+                        <label for="connectionNote">LinkedIn connection note (≤ 300 characters)</label>
+                        <div class="note-container">
+                            <textarea id="connectionNote" style="height:100px;" maxlength="300"></textarea>
+                            <button id="copyNoteBtn" class="copy-btn">📋 Copy Note</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="targetEmailInline">Recipient email (required only when you click "Fire Execution")</label>
+                            <input type="email" id="targetEmailInline" placeholder="e.g. recruiter@example.com" autocomplete="email" />
+                        <p class="step-hint" style="font-size: 0.8rem; opacity: 0.7; margin-top: 0.35rem;">Auto-syncs with the email field in Step 3 — fill it in either place.</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="subject">Email Subject</label>
+                        <input type="text" id="subject" />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="body">Tailored Email Draft (Editable)</label>
+                        <textarea id="body"></textarea>
+                    </div>
+
+                    <div class="attach-row form-group">
+                        <label for="resumeAttach">Attach resume</label>
+                        <div class="attach-select-wrap">
+                            <select id="resumeAttach">
+                                <!-- Populated dynamically from /api/resumes. -->
+                            </select>
+                            <span id="resumeAttachHint" class="attach-hint">Defaults to the recommended persona — override right before sending.</span>
+                        </div>
+                    </div>
+
+                    {% if enable_email_scheduling %}
+                    <div class="form-group">
+                        <label for="scheduleNextMorning" style="display:flex; align-items:center; gap:0.55rem;">
+                            <input type="checkbox" id="scheduleNextMorning" checked />
+                            Schedule send for next day at {{ scheduler_hour_label }}
+                        </label>
+                        <p class="step-hint" style="font-size: 0.8rem; opacity: 0.75; margin-top: 0.3rem;">
+                            Uncheck this only if you want to send immediately right now.
+                        </p>
+                    </div>
+                    {% endif %}
+
+                    <div class="action-footer" style="display:flex; gap:1rem;">
+                        <button id="sendBtn" class="btn-success" style="flex:2;">Fire Execution (Email & Log)</button>
+                        <button id="loopBtn" class="btn-primary" style="flex:1; background: linear-gradient(135deg, #6366f1, #4f46e5); box-shadow: 0 10px 20px -10px rgba(99, 102, 241, 0.4);">🔄 Loop Next Target</button>
+                    </div>
+                </div>
+
+                {% if enable_followup_agent %}
+                <!-- FOLLOW-UP AGENT (easy remove: delete this block or set ENABLE_FOLLOWUP_AGENT=False in app.py) -->
+                <div id="agent-step" class="fade-in" style="margin-top: 2rem; border-top: 1px solid var(--panel-border); padding-top: 2rem;">
+                    <h2>Step 5: Ask tracker assistant</h2>
+                    <p class="step-hint" style="font-size: 0.9rem; opacity: 0.85; margin-bottom: 1rem;">
+                        Ask follow-up questions from your CSV history, for example: role at Company X, when analyzed, which resume was suggested, or latest status.
+                    </p>
+                    <div id="agentChatLog" class="agent-chat-log">
+                        <div class="agent-msg assistant">Ask a question about your tracked applications.</div>
+                    </div>
+                    <div class="agent-controls">
+                        <textarea id="agentQuestion" placeholder="e.g. What role did I analyze for NVIDIA and which resume was recommended?"></textarea>
+                        <button id="agentAskBtn" class="btn-primary" style="margin-top: 0.8rem;">Ask Assistant</button>
+                    </div>
+                </div>
+                {% endif %}
+
+            </div>
+        </main>
+        
+        <div id="toast" class="toast hidden">
+            <span class="toast-icon">🚀</span>
+            <span id="toast-msg">Execution Successful!</span>
+        </div>
+    </div>
+    <script src="/static/script.js"></script>
+</body>
+</html>
