@@ -42,8 +42,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const targetPersona = document.getElementById('targetPersona');
     const resumeSelect = document.getElementById('resumeSelect');
     
-    // LinkedIn search shortcuts. The alumni button is optional and only
-    // exists in the DOM when the user enabled it in their profile config.
+    // LinkedIn search shortcuts. Alumni is always rendered in the template,
+    // while label/emoji/school-slug remain profile-driven from /api/config.
     const searchAlumniBtn = document.getElementById('searchAlumniBtn');
     const searchRecruiterBtn = document.getElementById('searchRecruiterBtn');
     const searchManagerBtn = document.getElementById('searchManagerBtn');
@@ -530,6 +530,28 @@ document.addEventListener('DOMContentLoaded', () => {
         return `https://www.linkedin.com/search/results/people/?${params.toString()}`;
     };
 
+    // Normalize user-configured alumni school slug to avoid opening
+    // placeholder/random LinkedIn school pages.
+    const normalizeAlumniSchoolSlug = (rawSlug, rawLabel) => {
+        const slug = (rawSlug || '').trim().toLowerCase();
+        const label = (rawLabel || '').trim().toLowerCase();
+        const placeholderSlugs = new Set([
+            '',
+            'your-school',
+            'your-school-slug',
+            'school',
+            'school-slug',
+            'your-university',
+            'your-college'
+        ]);
+        if (placeholderSlugs.has(slug)) {
+            if (label.includes('drexel')) return 'drexel-university';
+            return '';
+        }
+        if (slug === 'drexel' || slug === 'drexel-alumni') return 'drexel-university';
+        return slug;
+    };
+
     const buildLinkedInPeopleUrl = ({ companyName, positionName, intent }) => {
         const company = (companyName || '').trim();
         const slug = companyToLinkedInSlug(company);
@@ -564,11 +586,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Intent: find affinity-school alumni currently at the target company.
         // The school slug is loaded from /api/config (profile.json -> networking.alumni_school_slug).
         // The /school/{slug}/people/ page constrains to alumni; we keyword-filter by company.
+        // If no school slug is configured, default to Drexel so this button
+        // always opens an actual school people page before applying company filter.
         if (intent === 'alumni') {
-            const slugForSchool = (APP_CONFIG.alumni && APP_CONFIG.alumni.school_slug) || '';
-            if (!slugForSchool) {
-                return fallbackKeywordSearch(company || '');
-            }
+            const configuredSlug = (APP_CONFIG.alumni && APP_CONFIG.alumni.school_slug) || '';
+            const affinityLabel = ((APP_CONFIG.alumni && APP_CONFIG.alumni.label) || 'Drexel Alumni').trim();
+            const slugForSchool = normalizeAlumniSchoolSlug(configuredSlug, affinityLabel) || 'drexel-university';
             const params = new URLSearchParams();
             if (company) params.set('keywords', company);
             return `https://www.linkedin.com/school/${encodeURIComponent(slugForSchool)}/people/?${params.toString()}`;
@@ -577,6 +600,64 @@ document.addEventListener('DOMContentLoaded', () => {
         // Default safety net.
         return fallbackKeywordSearch(company || 'United States');
     };
+
+    // Keep LinkedIn shortcut URLs fresh even when the user skips analysis
+    // and manually edits Company/Role in Step 3.
+    const refreshLinkedInShortcutUrls = () => {
+        const cName = (companyInput && companyInput.value) ? companyInput.value.trim() : '';
+        const pName = (positionInput && positionInput.value) ? positionInput.value.trim() : '';
+        if (searchAlumniBtn) {
+            searchAlumniBtn.href = buildLinkedInPeopleUrl({
+                companyName: cName,
+                positionName: pName,
+                intent: 'alumni'
+            });
+        }
+        if (searchRecruiterBtn) {
+            searchRecruiterBtn.href = buildLinkedInPeopleUrl({
+                companyName: cName,
+                positionName: pName,
+                intent: 'recruiter'
+            });
+        }
+        if (searchManagerBtn) {
+            searchManagerBtn.href = buildLinkedInPeopleUrl({
+                companyName: cName,
+                positionName: pName,
+                intent: 'manager'
+            });
+        }
+    };
+
+    if (companyInput) {
+        companyInput.addEventListener('input', refreshLinkedInShortcutUrls);
+        companyInput.addEventListener('change', refreshLinkedInShortcutUrls);
+    }
+    if (positionInput) {
+        positionInput.addEventListener('input', refreshLinkedInShortcutUrls);
+        positionInput.addEventListener('change', refreshLinkedInShortcutUrls);
+    }
+    // Prime hrefs once this helper is initialized.
+    setTimeout(refreshLinkedInShortcutUrls, 0);
+
+    // Force-open external search URLs on click so these shortcuts still work
+    // even if a stale session left href="#" in the DOM.
+    const bindLinkedInShortcutClick = (btn, intent) => {
+        if (!btn) return;
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            const url = buildLinkedInPeopleUrl({
+                companyName: (companyInput && companyInput.value) ? companyInput.value.trim() : '',
+                positionName: (positionInput && positionInput.value) ? positionInput.value.trim() : '',
+                intent
+            });
+            btn.href = url;
+            window.open(url, '_blank', 'noopener,noreferrer');
+        });
+    };
+    bindLinkedInShortcutClick(searchAlumniBtn, 'alumni');
+    bindLinkedInShortcutClick(searchRecruiterBtn, 'recruiter');
+    bindLinkedInShortcutClick(searchManagerBtn, 'manager');
 
     const safeCard = (obj, fallbackDetails) => ({
         status: (obj && obj.status) ? obj.status : '--',
@@ -734,23 +815,7 @@ document.addEventListener('DOMContentLoaded', () => {
             targetPersona.textContent = suggestedContact;
             
             // Build intent-specific LinkedIn URLs with company + US filter hints.
-            if (searchAlumniBtn) {
-                searchAlumniBtn.href = buildLinkedInPeopleUrl({
-                    companyName: cName,
-                    positionName: pName,
-                    intent: 'alumni'
-                });
-            }
-            searchRecruiterBtn.href = buildLinkedInPeopleUrl({
-                companyName: cName,
-                positionName: pName,
-                intent: 'recruiter'
-            });
-            searchManagerBtn.href = buildLinkedInPeopleUrl({
-                companyName: cName,
-                positionName: pName,
-                intent: 'manager'
-            });
+            refreshLinkedInShortcutUrls();
 
             // Populate Strategy Cards
             const sponsorship = safeCard(data.sponsorship_legal, 'No sponsorship assessment returned.');

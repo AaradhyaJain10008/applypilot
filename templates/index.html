@@ -196,13 +196,10 @@
                             <label>Identified Target Persona / Target Name</label>
                             <div class="persona-box" id="targetPersona">Searching for ideal contact...</div>
                             
-                            <!-- LinkedIn search shortcuts. The alumni button is
-                                 only rendered if the user enabled it in their
-                                 profile.json (alumni_search_enabled = true). -->
+                            <!-- LinkedIn search shortcuts. Keep the alumni button
+                                 always visible so affinity search is one click away. -->
                             <div class="search-grid">
-                                {% if alumni_search_enabled %}
-                                <a id="searchAlumniBtn" href="#" target="_blank" class="linkedin-btn drexel-btn">{{ alumni_button_emoji }} {{ alumni_button_label }}</a>
-                                {% endif %}
+                                <a id="searchAlumniBtn" href="#" target="_blank" class="linkedin-btn drexel-btn">{{ alumni_button_emoji or '🎓' }} {{ alumni_button_label or 'Drexel Alumni' }}</a>
                                 <a id="searchRecruiterBtn" href="#" target="_blank" class="linkedin-btn">🎯 Recruiters + TA</a>
                                 <a id="searchManagerBtn" href="#" target="_blank" class="linkedin-btn manager-btn">👔 Hiring Managers+</a>
                             </div>
