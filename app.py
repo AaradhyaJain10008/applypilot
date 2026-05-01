@@ -6,11 +6,13 @@ import csv
 import time
 import threading
 import uuid
+import ssl
 from datetime import datetime, timedelta, time as dt_time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from urllib import error as url_error
 from urllib import request as url_request
 import io
+import certifi
 from flask import Flask, render_template, request, jsonify, send_file
 from docx import Document
 from docx.shared import Pt
@@ -26,6 +28,7 @@ from config_loader import load_app_settings, load_profile, load_resume_personas
 load_dotenv(override=True)
 
 app = Flask(__name__)
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # Profile / persona / settings load from config/*.json (with .example.json fallback).
 PROFILE = load_profile()
@@ -114,20 +117,27 @@ TASK_CHAIN_NOTE = _parse_chain(os.getenv("TASK_CHAIN_NOTE"), _DEFAULT_CHAIN)
 TASK_CHAIN_ASK = _parse_chain(os.getenv("TASK_CHAIN_ASK"), _DEFAULT_CHAIN)
 TASK_CHAIN_COVER = _parse_chain(os.getenv("TASK_CHAIN_COVER"), _DEFAULT_CHAIN)
 
+
+def _resolve_runtime_path(path, fallback):
+    raw = (path or fallback or "").strip() or fallback
+    if os.path.isabs(raw):
+        return raw
+    return os.path.join(PROJECT_ROOT, raw)
+
 # Backward-compatible single-provider env vars (used by quota-health display only).
 TASK_PROVIDER_ANALYZE_PRIMARY = TASK_CHAIN_ANALYZE[0] if TASK_CHAIN_ANALYZE else "groq"
 TASK_PROVIDER_NOTE = TASK_CHAIN_NOTE[0] if TASK_CHAIN_NOTE else "groq"
 TASK_PROVIDER_ASK = TASK_CHAIN_ASK[0] if TASK_CHAIN_ASK else "groq"
 TASK_PROVIDER_DRAFT = TASK_CHAIN_DRAFT[0] if TASK_CHAIN_DRAFT else "groq"
 TASK_PROVIDER_COVER = TASK_CHAIN_COVER[0] if TASK_CHAIN_COVER else "groq"
-USAGE_LOG_PATH = os.getenv("AI_USAGE_LOG_PATH", "data/ai_usage_log.csv")
-JOB_TRACKER_PATH = os.getenv("JOB_TRACKER_PATH", "data/job_tracker.csv")
+USAGE_LOG_PATH = _resolve_runtime_path(os.getenv("AI_USAGE_LOG_PATH"), "data/ai_usage_log.csv")
+JOB_TRACKER_PATH = _resolve_runtime_path(os.getenv("JOB_TRACKER_PATH"), "data/job_tracker.csv")
 RESUME_DIR = os.getenv("RESUME_DIR", "resumes")
 DAILY_ANALYZE_SOFT_CAP = APP_SETTINGS.limit("daily_analyze_soft_cap",
     int(os.getenv("DAILY_ANALYZE_SOFT_CAP", "30")))
 DAILY_ANALYZE_HARD_CAP = APP_SETTINGS.limit("daily_analyze_hard_cap",
     int(os.getenv("DAILY_ANALYZE_HARD_CAP", "45")))
-SCHEDULED_EMAILS_FILE = os.getenv("SCHEDULED_EMAILS_FILE", "data/scheduled_emails.json")
+SCHEDULED_EMAILS_FILE = _resolve_runtime_path(os.getenv("SCHEDULED_EMAILS_FILE"), "data/scheduled_emails.json")
 EMAIL_SCHEDULER_POLL_SECONDS = max(5, APP_SETTINGS.scheduler_int("poll_seconds",
     int(os.getenv("EMAIL_SCHEDULER_POLL_SECONDS", "20"))))
 EMAIL_SCHEDULER_HOUR_LOCAL = APP_SETTINGS.scheduler_int("send_at_hour_local",
@@ -689,8 +699,12 @@ def _http_post_json(url, headers, payload, timeout_seconds):
     }
     full_headers.update(headers or {})
     req = url_request.Request(url, data=body, headers=full_headers, method="POST")
+    # Some Python installs on macOS don't trust the system keychain by default,
+    # which breaks HTTPS calls with CERTIFICATE_VERIFY_FAILED. Force certifi's
+    # CA bundle so Groq/Cerebras/GitHub requests verify consistently.
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
     try:
-        with url_request.urlopen(req, timeout=timeout_seconds) as resp:
+        with url_request.urlopen(req, timeout=timeout_seconds, context=ssl_ctx) as resp:
             return resp.read().decode("utf-8")
     except url_error.HTTPError as e:
         details = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else str(e)
@@ -902,6 +916,47 @@ _NOTE_GREETING_RE = re.compile(
 )
 
 
+_PLACEHOLDER_NAME_RE = re.compile(
+    r"^\s*(?:your(?:\s+full|\s+first)?\s+name|your\s+full\s+name|your\s+first\s+name|candidate\s+name)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_placeholder_name(value):
+    text = (value or "").strip()
+    if not text:
+        return True
+    return bool(_PLACEHOLDER_NAME_RE.match(text))
+
+
+def _safe_candidate_full_name():
+    for candidate in (PROFILE.full_name, PROFILE.signoff_name, PROFILE.preferred_name):
+        if not _is_placeholder_name(candidate):
+            return candidate.strip()
+    return "the candidate"
+
+
+def _safe_signoff_name():
+    for candidate in (PROFILE.signoff_name, PROFILE.full_name, PROFILE.preferred_name):
+        if not _is_placeholder_name(candidate):
+            return candidate.strip()
+    return ""
+
+
+def _scrub_placeholder_identity_text(text):
+    cleaned = str(text or "")
+    # Convert the most harmful leak pattern into natural language.
+    cleaned = re.sub(
+        r"\b[Ii]['’]?m\s+Your\s+(?:Full|First)\s+Name\b\s*,?\s*",
+        "I'm ",
+        cleaned,
+    )
+    # Remove raw placeholder remnants if they still appear.
+    cleaned = re.sub(r"\[?\bYour\s+(?:Full|First)\s+Name\b\]?", "", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return cleaned
+
+
 def _normalize_connection_note(note, max_chars=300, expected_first_name=None):
     """Clean + length-cap a connection note, defensively fixing two failure
     modes we've seen in real outputs:
@@ -915,7 +970,8 @@ def _normalize_connection_note(note, max_chars=300, expected_first_name=None):
        to stop at the last complete sentence; if no sentence boundary
        fits, we cut at the last space and append an ellipsis.
     """
-    cleaned = re.sub(r"\s+", " ", (note or "")).strip()
+    cleaned = _scrub_placeholder_identity_text(note)
+    cleaned = re.sub(r"\s+", " ", (cleaned or "")).strip()
     if not cleaned:
         return cleaned
 
@@ -1553,7 +1609,7 @@ def _build_connection_note_prompt(company, position, contact_name, resume_code, 
     first_name = clean_contact_name.split(" ")[0] if clean_contact_name else "there"
     note_greeting = f"Hi {first_name},"
 
-    candidate_full_name = PROFILE.full_name
+    candidate_full_name = _safe_candidate_full_name()
     note_char_limit = APP_SETTINGS.limit("connection_note_max_chars", 300)
 
     affinity_label = (PROFILE.networking.get("alumni_button_label") or "").strip()
@@ -1770,6 +1826,7 @@ def analyze_fit():
                 platform="Career Command Center",
                 message=f"JD analyzed — {fs_part}",
                 status="Analyzed",
+                tracker_path=JOB_TRACKER_PATH,
             )
         except Exception as log_err:
             print("Analysis CSV log skipped:", log_err)
@@ -1822,8 +1879,10 @@ def draft_email():
     try:
         raw_contact_input, clean_contact_name = _extract_clean_contact_name(contact_name)
 
-        candidate_full_name = PROFILE.full_name
-        signoff_name = PROFILE.signoff_name
+        candidate_full_name = _safe_candidate_full_name()
+        signoff_name = _safe_signoff_name() or (
+            candidate_full_name if candidate_full_name != "the candidate" else ""
+        )
         note_char_limit = APP_SETTINGS.limit("connection_note_max_chars", 300)
         body_min = APP_SETTINGS.limit("email_body_min_words", 140)
         body_max = APP_SETTINGS.limit("email_body_max_words", 230)
@@ -1949,9 +2008,9 @@ Job Description:
             ))
         # Degree-accuracy safety net for the email body/subject too.
         if result.get("body"):
-            result["body"] = _enforce_hard_facts(result["body"])
+            result["body"] = _enforce_hard_facts(_scrub_placeholder_identity_text(result["body"]))
         if result.get("subject"):
-            result["subject"] = _enforce_hard_facts(result["subject"])
+            result["subject"] = _enforce_hard_facts(_scrub_placeholder_identity_text(result["subject"]))
 
         _log_ai_usage("/api/draft", provider, model_used, draft_prompt, response_text, (time.time() - started) * 1000)
         return jsonify(result)
@@ -2091,8 +2150,8 @@ def _build_cover_letter_prompt(company, position, resume_code, jd, tone="profess
     company_short = _shorten_company_for_copy(company_full) or company_full
     company_first = _company_first_word(company_full) or company_short
 
-    candidate_full_name = PROFILE.full_name
-    signoff_name = PROFILE.signoff_name
+    candidate_full_name = _safe_candidate_full_name()
+    signoff_name = _safe_signoff_name() or (candidate_full_name if candidate_full_name != "the candidate" else "")
     cover_min = APP_SETTINGS.limit("cover_letter_min_words", 320)
     cover_max = APP_SETTINGS.limit("cover_letter_max_words", 450)
 
@@ -2263,7 +2322,7 @@ def _normalize_cover_letter_paragraphs(letter):
     # 2) Pull the sign-off off the end if present. We look for the candidate's
     #    configured sign-off name (escaped for regex) so the recovery still
     #    works even when each user has a different name.
-    signoff_name = (PROFILE.signoff_name or "").strip()
+    signoff_name = _safe_signoff_name()
     name_pattern = re.escape(signoff_name) if signoff_name else None
     signoff = ""
     if name_pattern:
@@ -2336,7 +2395,7 @@ def _normalize_cover_letter_paragraphs(letter):
 def _build_emergency_cover_letter(company, position, resume_code):
     company_text = (company or "your company").strip() or "your company"
     role_text = (position or "the role").strip() or "the role"
-    signoff_name = PROFILE.signoff_name or "(Your Name)"
+    signoff_name = _safe_signoff_name() or "Candidate"
     return (
         f"Dear {company_text} Hiring Team,\n\n"
         f"I am excited to apply for the {role_text} opportunity at {company_text}. "
@@ -2485,7 +2544,7 @@ def _render_cover_letter_pdf_bytes(letter_text):
         topMargin=1.0 * inch,
         bottomMargin=1.0 * inch,
         title="Cover Letter",
-        author=PROFILE.signoff_name or PROFILE.full_name,
+        author=_safe_signoff_name() or _safe_candidate_full_name(),
     )
 
     body_style = ParagraphStyle(
@@ -2639,6 +2698,7 @@ def send():
                 platform="Web Scheduled Email",
                 message=subject,
                 status=f"Scheduled for {send_at.strftime('%Y-%m-%d %H:%M')}",
+                tracker_path=JOB_TRACKER_PATH,
             )
             return jsonify({
                 "success": True,
@@ -2648,7 +2708,17 @@ def send():
         if not ENABLE_EMAIL_SENDING:
             return jsonify({"error": "Email sending is disabled in app_settings.json. Set features.enable_email_sending=true to enable."}), 400
         send_email(to_email=target_email, subject=subject, body=body, attachment_path=selected_pdf)
-        log_job(company=company, position=position, resume_used=resume_code, contact_name=contact_name, role="N/A", platform="Web Direct Email", message=subject, status="Applied")
+        log_job(
+            company=company,
+            position=position,
+            resume_used=resume_code,
+            contact_name=contact_name,
+            role="N/A",
+            platform="Web Direct Email",
+            message=subject,
+            status="Applied",
+            tracker_path=JOB_TRACKER_PATH,
+        )
         return jsonify({"success": True, "scheduled": False})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2666,9 +2736,9 @@ def app_config():
             "schedule_hour_label": f"{EMAIL_SCHEDULER_HOUR_LOCAL:02d}:00",
         },
         "candidate": {
-            "full_name": PROFILE.full_name,
+            "full_name": _safe_candidate_full_name(),
             "preferred_name": PROFILE.preferred_name,
-            "signoff_name": PROFILE.signoff_name,
+            "signoff_name": _safe_signoff_name(),
         },
         "features": {
             "enable_followup_agent": ENABLE_FOLLOWUP_AGENT,

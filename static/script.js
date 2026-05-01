@@ -126,24 +126,23 @@ document.addEventListener('DOMContentLoaded', () => {
         saveSession();
     };
 
-    const promptForPersona = (contextLabel) => {
+    const getSelectedPersona = (contextLabel) => {
         const available = (RESUME_REGISTRY || []).filter(item => item.exists);
         if (!available.length) {
             alert('No valid resume personas are available yet. Check /api/resumes and PDF files.');
             return null;
         }
-        const currentCode = (resumeAttach && resumeAttach.value) || (resumeSelect && resumeSelect.value) || available[0].code;
-        const lines = available.map(item => `${item.code} = ${item.label}`);
-        const userInput = prompt(
-            `Choose resume persona for ${contextLabel}.\n\n${lines.join('\n')}\n\nType a code (current: ${currentCode}):`,
-            currentCode
-        );
-        if (userInput === null) return null;
-        const chosen = userInput.trim().toUpperCase();
-        if (!chosen) return null;
+        // Use the inline dropdown as the single source of truth (no browser popups).
+        const chosen = ((resumeSelect && resumeSelect.value) || (resumeAttach && resumeAttach.value) || available[0].code || '').trim().toUpperCase();
+        if (!chosen) {
+            alert(`Choose a resume persona in "Optimum persona" before ${contextLabel}.`);
+            if (resumeSelect) resumeSelect.focus();
+            return null;
+        }
         const match = available.find(item => item.code === chosen);
         if (!match) {
             alert(`Invalid resume code "${chosen}". Use one of: ${available.map(a => a.code).join(', ')}`);
+            if (resumeSelect) resumeSelect.focus();
             return null;
         }
         applyPersonaSelection(chosen);
@@ -1050,7 +1049,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Please paste a job description and run Deep Strategic Analysis first.');
             return;
         }
-        const chosenPersona = promptForPersona('cover letter');
+        const chosenPersona = getSelectedPersona('cover letter');
         if (!chosenPersona) return;
         const payload = {
             jd,
@@ -1106,7 +1105,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (regenerateCoverBtn) regenerateCoverBtn.addEventListener('click', runCoverLetter);
     if (chooseCoverPersonaBtn) {
         chooseCoverPersonaBtn.addEventListener('click', () => {
-            promptForPersona('cover letter');
+            if (resumeSelect) resumeSelect.focus();
+            alert('Choose your persona from the "Optimum persona" dropdown, then generate cover letter.');
         });
     }
 
@@ -1201,7 +1201,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (draftNoteBtn) {
         draftNoteBtn.addEventListener('click', async () => {
             const payload = getDraftBasePayload();
-            const chosenPersona = promptForPersona('connection note');
+            const chosenPersona = getSelectedPersona('connection note');
             if (!chosenPersona) return;
             payload.resume_code = chosenPersona;
             if (!validateDraftInputs(payload)) return;
@@ -1244,7 +1244,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     draftBtn.addEventListener('click', async () => {
         const payload = getDraftBasePayload();
-        const chosenPersona = promptForPersona('email draft');
+        const chosenPersona = getSelectedPersona('email draft');
         if (!chosenPersona) return;
         payload.resume_code = chosenPersona;
         if (!validateDraftInputs(payload)) return;
@@ -1296,7 +1296,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (chooseDraftPersonaBtn) {
         chooseDraftPersonaBtn.addEventListener('click', () => {
-            promptForPersona('email drafting');
+            if (resumeSelect) resumeSelect.focus();
+            alert('Choose your persona from the "Optimum persona" dropdown before drafting.');
         });
     }
 
@@ -1337,6 +1338,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (targetEmailInline) targetEmailInline.focus();
             return;
         }
+
+        const willSchedule = !!(scheduleNextMorning && scheduleNextMorning.checked);
+        const actionLabel = willSchedule ? 'schedule this email for tomorrow morning' : 'send this email right now';
+        const confirmMessage =
+            `You are about to ${actionLabel}.\n\n` +
+            `To: ${recipientEmail}\n` +
+            `Company: ${payload.company || 'N/A'}\n` +
+            `Role: ${payload.position || 'N/A'}\n\n` +
+            `Continue?`;
+        if (!confirm(confirmMessage)) return;
 
         sendBtn.disabled = true;
         const originalText = sendBtn.textContent;

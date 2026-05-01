@@ -20,10 +20,23 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _resolve_project_path(path: str) -> str:
+    """Resolve relative config paths against the project root, not cwd."""
+    if not path:
+        return path
+    if os.path.isabs(path):
+        return path
+    return os.path.join(_PROJECT_ROOT, path)
+
 
 def _read_json_with_fallback(primary_path: str, example_path: str) -> Dict[str, Any]:
     """Load a JSON file, falling back to its *.example.json sibling if missing."""
-    for path in (primary_path, example_path):
+    primary_resolved = _resolve_project_path(primary_path)
+    example_resolved = _resolve_project_path(example_path)
+    for path in (primary_resolved, example_resolved):
         if not path:
             continue
         if not os.path.exists(path):
@@ -35,7 +48,7 @@ def _read_json_with_fallback(primary_path: str, example_path: str) -> Dict[str, 
             print(f"[config] Failed to parse {path}: {exc}")
             continue
     print(
-        f"[config] No config file found at {primary_path!r} or {example_path!r}; "
+        f"[config] No config file found at {primary_resolved!r} or {example_resolved!r}; "
         "using empty defaults."
     )
     return {}
@@ -398,7 +411,7 @@ def load_resume_personas(
     example = "config/resume_personas.example.json"
     raw = _read_json_with_fallback(primary, example)
     rdir = resume_dir or os.getenv("RESUME_DIR", "resumes")
-    return ResumePersonas(raw, resume_dir=rdir)
+    return ResumePersonas(raw, resume_dir=_resolve_project_path(rdir))
 
 
 def load_app_settings(env_path: Optional[str] = None) -> AppSettings:

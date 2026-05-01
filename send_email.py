@@ -13,9 +13,7 @@ def send_email(to_email, subject, body, attachment_path=None):
     app_password = os.getenv("EMAIL_APP_PASSWORD")
 
     if not sender_email or not app_password:
-        print("ERROR: SENDER_EMAIL or EMAIL_APP_PASSWORD not set in environment.")
-        print("Please configure these variables to send emails.")
-        return
+        raise RuntimeError("SENDER_EMAIL or EMAIL_APP_PASSWORD not set in environment.")
 
     msg = MIMEMultipart()
     msg['From'] = sender_email
@@ -41,8 +39,9 @@ def send_email(to_email, subject, body, attachment_path=None):
         server.sendmail(sender_email, to_email, text)
         server.quit()
         print(f"✅ Successfully sent email to {to_email}")
+        return True
     except Exception as e:
-        print(f"❌ Failed to send email: {e}")
+        raise RuntimeError(f"Failed to send email: {e}") from e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Send a cold outreach email.")
