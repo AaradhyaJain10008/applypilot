@@ -309,6 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearSession = () => {
         try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
         cachedAnalysisResult = null;
+        lastScoutKey = '';
     };
 
     // Wire up auto-save on every tracked field. Using capture=true so we
@@ -658,6 +659,288 @@ document.addEventListener('DOMContentLoaded', () => {
     bindLinkedInShortcutClick(searchRecruiterBtn, 'recruiter');
     bindLinkedInShortcutClick(searchManagerBtn, 'manager');
 
+    let scoutProgressInterval = null;
+    let lastScoutKey = '';
+
+    const ensureScoutStatusEl = () => {
+        let el = document.getElementById('scoutStatus');
+        if (el) return el;
+        const anchor = targetPersona || peopleStep;
+        if (!anchor || !anchor.parentElement) return null;
+        el = document.createElement('div');
+        el.id = 'scoutStatus';
+        el.style.marginTop = '0.55rem';
+        el.style.fontSize = '0.85rem';
+        el.style.opacity = '0.9';
+        el.style.minHeight = '1.2rem';
+        el.textContent = '';
+        anchor.parentElement.appendChild(el);
+        return el;
+    };
+
+    const setScoutStatus = (message, tone = 'neutral') => {
+        const el = ensureScoutStatusEl();
+        if (!el) return;
+        el.textContent = message || '';
+        if (tone === 'warn') el.style.color = '#fbbf24';
+        else if (tone === 'error') el.style.color = '#f87171';
+        else if (tone === 'ok') el.style.color = '#34d399';
+        else el.style.color = '';
+    };
+
+    const startScoutProgress = (baseMessage) => {
+        if (scoutProgressInterval) clearInterval(scoutProgressInterval);
+        let tick = 0;
+        scoutProgressInterval = setInterval(() => {
+            tick = (tick + 1) % 4;
+            setScoutStatus(`${baseMessage}${'.'.repeat(tick)}`, 'neutral');
+        }, 500);
+    };
+
+    const stopScoutProgress = (message, tone = 'neutral') => {
+        if (scoutProgressInterval) {
+            clearInterval(scoutProgressInterval);
+            scoutProgressInterval = null;
+        }
+        if (message) setScoutStatus(message, tone);
+    };
+
+    const scoutCacheKey = () => {
+        const c = (companyInput && companyInput.value || '').trim().toLowerCase();
+        const p = (positionInput && positionInput.value || '').trim().toLowerCase();
+        const jd = (jdInput && jdInput.value || '').trim().slice(0, 120).toLowerCase();
+        return `${c}::${p}::${jd}`;
+    };
+
+    const runDiscoveryAndEnrichment = async () => {
+        const sourceUrl = (window.location && window.location.href) ? window.location.href : '';
+        const company = (companyInput && companyInput.value || '').trim();
+        const position = (positionInput && positionInput.value || '').trim();
+        const jd = (jdInput && jdInput.value || '').trim();
+        if (!company && !position && !jd) return;
+
+        const key = scoutCacheKey();
+        if (key && key === lastScoutKey) return;
+
+        const jobId = `job_${Date.now()}`;
+        try {
+            startScoutProgress('Searching for jobs');
+            const discoveryResp = await fetch('/api/discovery', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    source_url: sourceUrl,
+                    company,
+                    position,
+                    jd,
+                }),
+            });
+            const discoveryData = await discoveryResp.json();
+            if (!discoveryResp.ok) {
+                if (discoveryData.error_type === 'budget_safe_stop') {
+                    stopScoutProgress(`Scout paused by budget guardrail: ${discoveryData.error}`, 'warn');
+                    return;
+                }
+                throw new Error(discoveryData.error || 'Discovery failed');
+            }
+
+            startScoutProgress('Enriching top matches');
+            const enrichResp = await fetch('/api/enrichment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    company,
+                    position,
+                    source_url: sourceUrl,
+                    discovery_run_id: discoveryData.run_id || '',
+                    actor_input: {
+                        company,
+                        position,
+                        sourceUrl,
+                        discoveredItems: discoveryData.items || [],
+                    },
+                }),
+            });
+            const enrichData = await enrichResp.json();
+            if (!enrichResp.ok) {
+                if (enrichData.error_type === 'budget_safe_stop') {
+                    stopScoutProgress(`Scout paused by budget guardrail: ${enrichData.error}`, 'warn');
+                    return;
+                }
+                throw new Error(enrichData.error || 'Enrichment failed');
+            }
+
+            const handoff = enrichData.handoff || {};
+            if (handoff.company && companyInput && !companyInput.value.trim()) companyInput.value = handoff.company;
+            if (handoff.position && positionInput && !positionInput.value.trim()) positionInput.value = handoff.position;
+            if (handoff.contact_name && contactNameInput && !contactNameInput.value.trim()) contactNameInput.value = handoff.contact_name;
+            if (handoff.target_email && targetEmailInput && !targetEmailInput.value.trim()) targetEmailInput.value = handoff.target_email;
+            if (handoff.contact_role && targetPersona) targetPersona.textContent = handoff.contact_role;
+
+            refreshLinkedInShortcutUrls();
+            saveSession();
+            lastScoutKey = key;
+            stopScoutProgress('Scout ready: discovery + enrichment completed.', 'ok');
+        } catch (error) {
+            stopScoutProgress(`Scout error: ${error.message}`, 'error');
+        }
+    };
+
+    // Step 1: one-click scout for postings (keyword fixed to analyst on the backend default).
+    const jobScoutBtn = document.getElementById('jobScoutBtn');
+    const jobScoutStatus = document.getElementById('jobScoutStatus');
+    const jobScoutResults = document.getElementById('jobScoutResults');
+
+    const jdFromListing = (job) => {
+        const raw = job && job.raw ? job.raw : {};
+        const parts = [];
+        parts.push(job.title ? `${job.title}` : '');
+        parts.push(job.company ? `(${job.company})` : '');
+        parts.push('');
+        const desc =
+            job.description ||
+            raw.description ||
+            raw.jobDescription ||
+            raw.descriptionText ||
+            raw.description_html ||
+            raw.jobDescriptionHtml ||
+            '';
+        if (desc) {
+            parts.push(String(desc));
+        } else {
+            parts.push('---');
+            parts.push('Paste the full job description body from the listing page into this box.');
+            if (job.url) parts.push('');
+            if (job.url) parts.push(job.url);
+        }
+        return parts.filter(Boolean).join('\n').trim();
+    };
+
+    const renderJobScoutResults = (jobs, meta) => {
+        if (!jobScoutResults) return;
+        jobScoutResults.innerHTML = '';
+        if (!jobs || !jobs.length) {
+            jobScoutResults.classList.remove('hidden');
+            jobScoutResults.innerHTML =
+                `<div class="scout-row"><div class="scout-row-main"><div class="scout-row-title">No listings returned</div>` +
+                `<div class="scout-row-meta">Actors may require different JSON input shapes — tune <code>APIFY_LINKEDIN_JOBS_INPUT_JSON</code> / <code>APIFY_GREENHOUSE_JOBS_INPUT_JSON</code> for your actors.</div></div></div>`;
+            return;
+        }
+
+        jobs.forEach((job) => {
+            const row = document.createElement('div');
+            row.className = 'scout-row';
+
+            const main = document.createElement('div');
+            main.className = 'scout-row-main';
+
+            const title = document.createElement('div');
+            title.className = 'scout-row-title';
+            title.textContent = job.title || '(untitled role)';
+
+            const metaLine = document.createElement('div');
+            metaLine.className = 'scout-row-meta';
+
+            const chip = document.createElement('span');
+            chip.className = `scout-chip ${job.source === 'greenhouse' ? 'greenhouse' : 'linkedin'}`;
+            chip.textContent = job.source || 'listing';
+
+            metaLine.appendChild(chip);
+            if (job.company) {
+                const sep = document.createTextNode(` · ${job.company}`);
+                metaLine.appendChild(sep);
+            }
+            if (job.posted_hint) {
+                const hint = document.createTextNode(` · ${job.posted_hint}`);
+                metaLine.appendChild(hint);
+            }
+
+            main.appendChild(title);
+            main.appendChild(metaLine);
+
+            const useBtn = document.createElement('button');
+            useBtn.type = 'button';
+            useBtn.className = 'scout-mini-btn';
+            useBtn.textContent = 'Use';
+            useBtn.addEventListener('click', () => {
+                if (!jdInput) return;
+                jdInput.value = jdFromListing(job);
+                if (companyInput && job.company) companyInput.value = job.company;
+                if (positionInput && job.title) positionInput.value = job.title;
+                saveSession();
+            });
+
+            const openBtn = document.createElement('button');
+            openBtn.type = 'button';
+            openBtn.className = 'scout-mini-btn';
+            openBtn.textContent = 'Open';
+            openBtn.disabled = !job.url;
+            openBtn.addEventListener('click', () => {
+                if (!job.url) return;
+                window.open(job.url, '_blank', 'noopener,noreferrer');
+            });
+
+            row.appendChild(main);
+            row.appendChild(useBtn);
+            row.appendChild(openBtn);
+            jobScoutResults.appendChild(row);
+        });
+
+        jobScoutResults.classList.remove('hidden');
+        const runBits = [];
+        const liRun = meta && meta.linkedin && meta.linkedin.run_id;
+        const ghRun = meta && meta.greenhouse && meta.greenhouse.run_id;
+        if (liRun) runBits.push(`LI run ${liRun}`);
+        if (ghRun) runBits.push(`GH run ${ghRun}`);
+        if (jobScoutStatus && meta && meta.linkedin_search_url) {
+            const tail = runBits.length ? ` · ${runBits.join(' · ')}` : '';
+            jobScoutStatus.innerHTML =
+                `Search URL (time filter): <code style="font-size:0.7rem;">${meta.linkedin_search_url}</code>${tail}`;
+        }
+    };
+
+    const runJobPostingScout = async () => {
+        if (!jobScoutBtn) return;
+        jobScoutBtn.disabled = true;
+        if (jobScoutResults) jobScoutResults.classList.add('hidden');
+        if (jobScoutStatus) {
+            jobScoutStatus.textContent = 'Scouting recent listings via Apify (this may take ~30–90s)...';
+        }
+        try {
+            const resp = await fetch('/api/scout/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keyword: 'analyst' }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                if (data.error_type === 'budget_safe_stop') {
+                    if (jobScoutStatus) {
+                        jobScoutStatus.textContent = `Paused by Apify budget guardrail: ${data.error}`;
+                    }
+                    return;
+                }
+                throw new Error(data.error || 'Scout failed');
+            }
+            const warns = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
+            const warnTxt = warns.length ? ` ⚠️ ${warns.join(' · ')}` : '';
+            if (jobScoutStatus) {
+                jobScoutStatus.textContent =
+                    `Found ${(data.jobs || []).length} listing(s).${warnTxt}`.trim();
+            }
+            renderJobScoutResults(data.jobs || [], data);
+        } catch (err) {
+            if (jobScoutStatus) jobScoutStatus.textContent = `Scout error: ${err.message}`;
+        } finally {
+            jobScoutBtn.disabled = false;
+        }
+    };
+
+    if (jobScoutBtn) {
+        jobScoutBtn.addEventListener('click', runJobPostingScout);
+    }
+
     const safeCard = (obj, fallbackDetails) => ({
         status: (obj && obj.status) ? obj.status : '--',
         details: (obj && obj.details) ? obj.details : fallbackDetails
@@ -916,6 +1199,7 @@ document.addEventListener('DOMContentLoaded', () => {
         analysisStep.classList.add('hidden');
         peopleStep.classList.remove('hidden');
         peopleStep.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        runDiscoveryAndEnrichment();
         saveSession();
     };
     moveToPeopleBtn.addEventListener('click', handleMoveToPeople);
@@ -1021,6 +1305,7 @@ document.addEventListener('DOMContentLoaded', () => {
             analysisStep.classList.add('hidden');
             peopleStep.classList.remove('hidden');
             peopleStep.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            runDiscoveryAndEnrichment();
             saveSession();
         });
     }

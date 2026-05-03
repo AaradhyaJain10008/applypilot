@@ -9,8 +9,10 @@ import uuid
 import ssl
 from datetime import datetime, timedelta, time as dt_time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from pathlib import Path
 from urllib import error as url_error
 from urllib import request as url_request
+from urllib.parse import quote
 import io
 import certifi
 from flask import Flask, render_template, request, jsonify, send_file
@@ -22,6 +24,7 @@ from google.api_core import retry as gapi_retry
 from send_email import send_email
 from log_job import log_job
 from config_loader import load_app_settings, load_profile, load_resume_personas
+from services.apify_client import ApifyClientService, ApifySafeStop, ApifyConfigError
 
 # override=True ensures that edits to .env take effect on every Flask reload,
 # rather than being shadowed by stale values inherited from the parent process env.
@@ -868,6 +871,210 @@ def _friendly_ai_error(err, default_prefix):
         )
         return msg, 429
     return f"{default_prefix}: {raw}", 500
+
+
+def _build_discovery_input(payload):
+    source_url = (payload.get("source_url") or "").strip()
+    company = (payload.get("company") or "").strip()
+    position = (payload.get("position") or "").strip()
+    jd = (payload.get("jd") or "").strip()
+    if payload.get("actor_input") and isinstance(payload.get("actor_input"), dict):
+        return payload["actor_input"]
+    return {
+        "sourceUrl": source_url,
+        "company": company,
+        "position": position,
+        "jd": jd,
+        "startUrls": ([{"url": source_url}] if source_url else []),
+    }
+
+
+def _extract_enrichment_handoff(items):
+    """Best-effort mapper from actor output to existing form fields."""
+    if not items:
+        return {}
+    first = items[0] if isinstance(items[0], dict) else {}
+    contact_name = first.get("contact_name") or first.get("fullName") or first.get("name") or ""
+    contact_role = first.get("contact_role") or first.get("title") or first.get("role") or ""
+    target_email = first.get("target_email") or first.get("email") or ""
+    company = first.get("company") or ""
+    position = first.get("position") or ""
+    out = {
+        "company": str(company).strip(),
+        "position": str(position).strip(),
+        "contact_name": str(contact_name).strip(),
+        "contact_role": str(contact_role).strip(),
+        "target_email": str(target_email).strip(),
+    }
+    return {k: v for k, v in out.items() if v}
+
+
+def _normalize_apify_error(err):
+    raw = str(err)
+    upper = raw.upper()
+    if "APIFY_TOKEN" in upper:
+        return "Apify is not configured (missing APIFY_TOKEN).", 503
+    if "ACTOR" in upper and "REQUIRED" in upper:
+        return "Apify actor IDs are not configured in .env.", 503
+    if "FAILED AFTER" in upper:
+        return f"Apify actor run failed after retries: {raw}", 502
+    return f"Apify request failed: {raw}", 500
+
+
+def _parse_optional_json_env(name: str) -> dict:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _deep_merge_dicts(base: dict, extra: dict) -> dict:
+    out = dict(base or {})
+    for key, val in (extra or {}).items():
+        if isinstance(val, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge_dicts(out[key], val)
+        else:
+            out[key] = val
+    return out
+
+
+def _build_linkedin_jobs_search_url(keyword: str, posted_within_seconds: int) -> str:
+    kw = (keyword or "").strip()
+    secs = max(1, int(posted_within_seconds))
+    encoded = quote(kw, safe="")
+    # LinkedIn encodes \"Date posted\" as f_TPR=r<seconds>; r86400 = past 24h.
+    url = (
+        "https://www.linkedin.com/jobs/search/?keywords="
+        f"{encoded}&sortBy=R&f_TPR=r{secs}"
+    )
+    # Optional: align with a manual search (e.g. United States geoId=103644278).
+    geo = (os.getenv("SCOUT_LINKEDIN_GEO_ID") or "").strip()
+    if geo:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}geoId={quote(geo, safe='')}"
+    return url
+
+
+def _linkedin_jobs_actor_input(
+    *,
+    linkedin_url: str,
+    keyword: str,
+    max_items: int,
+    actor_id: str,
+    extras: dict,
+) -> dict:
+    """
+    Map our scout params to Apify actor input.
+
+    curious_coder/linkedin-jobs-scraper expects:
+      { \"urls\": [\"https://...\"], \"count\": N }  (count minimum 10 in schema)
+
+    We previously sent urls as [{\"url\": ...}] which yields empty datasets for that actor.
+    """
+    count = max(10, min(int(max_items), 1000))
+    actor_lower = (actor_id or "").lower()
+
+    # curious_coder linkedin-jobs-scraper (public search URL only)
+    if "linkedin-jobs-scraper" in actor_lower and "unlimited" not in actor_lower:
+        base = {
+            "urls": [linkedin_url],
+            "count": count,
+        }
+    else:
+        # Broad fallback for other actors (Puppeteer startUrls style, etc.)
+        base = {
+            "startUrls": [{"url": linkedin_url}],
+            "urls": [linkedin_url],
+            "searchUrl": linkedin_url,
+            "keyword": keyword,
+            "keywords": keyword,
+            "maxItems": max_items,
+        }
+
+    merged = _deep_merge_dicts(base, extras or {})
+
+    # Normalize urls: some templates use [{ "url": "..." }]; this actor needs string[].
+    u = merged.get("urls")
+    if isinstance(u, list) and u and isinstance(u[0], dict):
+        merged["urls"] = [str(x.get("url") or "") for x in u if isinstance(x, dict) and x.get("url")]
+    # Map maxItems -> count when count missing (curious_coder schema uses count).
+    if "count" not in merged and merged.get("maxItems") is not None:
+        try:
+            merged["count"] = max(10, min(int(merged["maxItems"]), 1000))
+        except Exception:
+            pass
+
+    return merged
+
+
+def _extract_job_candidates_from_items(source: str, items: list) -> list:
+    rows = []
+    if not isinstance(items, list):
+        return rows
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        title = raw.get("title") or raw.get("jobTitle") or raw.get("position") or raw.get("name") or ""
+        comp_val = raw.get("company") or raw.get("companyName")
+        if isinstance(comp_val, dict):
+            company = comp_val.get("name") or ""
+        else:
+            company = comp_val or ""
+        url = (
+            raw.get("url")
+            or raw.get("jobUrl")
+            or raw.get("jobPostingUrl")
+            or raw.get("link")
+            or raw.get("applyUrl")
+            or ""
+        )
+        posted = raw.get("postedAt") or raw.get("postedTime") or raw.get("posted") or ""
+        rows.append(
+            {
+                "title": str(title).strip(),
+                "company": str(company).strip(),
+                "url": str(url).strip(),
+                "source": source,
+                "posted_hint": str(posted).strip(),
+                "raw": raw,
+            }
+        )
+    return rows
+
+
+def _merge_jobs_by_url(records: list) -> list:
+    seen = set()
+    merged = []
+    for row in records or []:
+        url = str(row.get("url") or "").strip()
+        title = str(row.get("title") or "").strip()
+        company = str(row.get("company") or "").strip()
+        key = url if url else f"{company}|{title}"
+        norm = key.lower()
+        if not norm:
+            continue
+        if norm in seen:
+            continue
+        seen.add(norm)
+        item = dict(row)
+        raw = item.get("raw")
+        if isinstance(raw, dict):
+            desc = (
+                raw.get("description")
+                or raw.get("jobDescription")
+                or raw.get("descriptionText")
+                or raw.get("description_html")
+                or raw.get("jobDescriptionHtml")
+            )
+            if desc:
+                item["description"] = str(desc)
+        item.pop("raw", None)
+        merged.append(item)
+    return merged
 
 
 # Disable Gemini SDK's internal retry so a 429 (quota) error surfaces immediately
@@ -2648,6 +2855,235 @@ def cover_letter_docx():
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+@app.route("/api/scout/jobs", methods=["POST"])
+def scout_jobs():
+    """
+    Pull recent postings (LinkedIn jobs search + optional Greenhouse actor).
+
+    Frontend uses keyword "analyst" by default; LinkedIn timeframe is encoded as
+    f_TPR=r<seconds> — default SecondsPostFilter uses 10000 (user preference vs 86400).
+    """
+    data = request.json or {}
+    keyword = (data.get("keyword") or os.getenv("SCOUT_JOB_KEYWORD_DEFAULT", "analyst")).strip() or "analyst"
+    try:
+        max_items = max(1, min(int(data.get("max_items") or os.getenv("SCOUT_JOB_MAX_ITEMS", "80")), 10000))
+    except Exception:
+        max_items = 80
+    try:
+        seconds_filter = max(60, min(int(os.getenv("SCOUT_LINKEDIN_POSTED_SECONDS", "10000")), 31536000))
+    except Exception:
+        seconds_filter = 10000
+
+    linkedin_actor = (
+        (os.getenv("APIFY_ACTOR_LINKEDIN_JOBS_ID") or "").strip()
+        or (os.getenv("APIFY_ACTOR_JOB_SCOUT_LINKEDIN_ID") or "").strip()
+        or (os.getenv("APIFY_ACTOR_DISCOVERY_ID") or "").strip()
+    )
+    greenhouse_actor = (
+        (os.getenv("APIFY_ACTOR_GREENHOUSE_JOBS_ID") or "").strip()
+        or (os.getenv("APIFY_ACTOR_GREENHOUSE_ID") or "").strip()
+    )
+
+    if not linkedin_actor:
+        return jsonify({"error": "Configure APIFY_ACTOR_LINKEDIN_JOBS_ID (or reuse APIFY_ACTOR_DISCOVERY_ID)."}), 503
+
+    scout_log_path = Path(PROJECT_ROOT) / "data" / "job_scout_runs.jsonl"
+
+    warnings: list = []
+
+    linkedin_url = _build_linkedin_jobs_search_url(keyword, seconds_filter)
+
+    extras_li = _parse_optional_json_env("APIFY_LINKEDIN_JOBS_INPUT_JSON")
+    linkedin_input = _linkedin_jobs_actor_input(
+        linkedin_url=linkedin_url,
+        keyword=keyword,
+        max_items=max_items,
+        actor_id=linkedin_actor,
+        extras=extras_li,
+    )
+
+    extras_gh = _parse_optional_json_env("APIFY_GREENHOUSE_JOBS_INPUT_JSON")
+
+    combined: list = []
+    results_meta: dict = {}
+
+    try:
+        service = ApifyClientService()
+    except ApifyConfigError as cfg_err:
+        return jsonify({"error": str(cfg_err)}), 503
+
+    try:
+        li_res = service.run_actor(
+            actor_id=linkedin_actor,
+            actor_input=linkedin_input,
+            log_path=scout_log_path,
+            record_type="job_scout_linkedin",
+            extra_meta={"keyword": keyword, "linkedin_search_url": linkedin_url},
+        )
+        results_meta["linkedin"] = {
+            "run_id": li_res.run_id,
+            "item_count": len(li_res.items or []),
+            "estimated_cost_usd": li_res.estimated_cost_usd,
+        }
+        combined.extend(_extract_job_candidates_from_items("linkedin", li_res.items or []))
+    except ApifySafeStop as safe_stop:
+        return jsonify(
+            {
+                "error": str(safe_stop),
+                "error_type": "budget_safe_stop",
+                "paused": True,
+            }
+        ), 429
+    except Exception as err:
+        msg, code = _normalize_apify_error(err)
+        warnings.append(f"LinkedIn scout failed: {msg}")
+        results_meta["linkedin"] = {"error": msg}
+
+    if greenhouse_actor:
+        if extras_gh:
+            gh_input = _deep_merge_dicts(
+                extras_gh,
+                {
+                    "maxItems": max_items,
+                    "keyword": keyword,
+                    "keywords": keyword,
+                    "search": keyword,
+                    "query": keyword,
+                },
+            )
+        else:
+            gh_input = {
+                "keyword": keyword,
+                "keywords": keyword,
+                "search": keyword,
+                "query": keyword,
+                "maxItems": max_items,
+            }
+        try:
+            gh_res = service.run_actor(
+                actor_id=greenhouse_actor,
+                actor_input=gh_input,
+                log_path=scout_log_path,
+                record_type="job_scout_greenhouse",
+                extra_meta={"keyword": keyword},
+            )
+            results_meta["greenhouse"] = {
+                "run_id": gh_res.run_id,
+                "item_count": len(gh_res.items or []),
+                "estimated_cost_usd": gh_res.estimated_cost_usd,
+            }
+            combined.extend(_extract_job_candidates_from_items("greenhouse", gh_res.items or []))
+        except ApifySafeStop as safe_stop:
+            return jsonify(
+                {
+                    "error": str(safe_stop),
+                    "error_type": "budget_safe_stop",
+                    "paused": True,
+                    "partial_jobs": _merge_jobs_by_url(combined),
+                    "warnings": warnings,
+                }
+            ), 429
+        except Exception as err:
+            msg, _code = _normalize_apify_error(err)
+            warnings.append(f"Greenhouse scout failed: {msg}")
+            results_meta["greenhouse"] = {"error": msg}
+    else:
+        warnings.append("Greenhouse scout skipped — set APIFY_ACTOR_GREENHOUSE_JOBS_ID in .env.")
+
+    merged = _merge_jobs_by_url(combined)
+    merged.sort(key=lambda row: ((row.get("title") or "").lower(), (row.get("company") or "").lower()))
+
+    return jsonify(
+        {
+            "success": True,
+            "keyword": keyword,
+            "linkedin_search_url": linkedin_url,
+            "posted_within_seconds": seconds_filter,
+            "max_items_per_source": max_items,
+            "jobs": merged,
+            "runs": results_meta,
+            "warnings": warnings,
+        }
+    )
+
+
+@app.route("/api/discovery", methods=["POST"])
+def discovery():
+    data = request.json or {}
+    job_id = (data.get("job_id") or "").strip()
+    source_url = (data.get("source_url") or "").strip()
+    if not job_id:
+        return jsonify({"error": "job_id is required for discovery deduplication."}), 400
+    if not source_url:
+        return jsonify({"error": "source_url is required for discovery."}), 400
+
+    try:
+        service = ApifyClientService()
+        result = service.run_discovery(
+            job_id=job_id,
+            source_url=source_url,
+            actor_input=_build_discovery_input(data),
+        )
+        return jsonify({
+            "success": True,
+            "status": result.status,
+            "skipped": result.skipped,
+            "reason": result.reason,
+            "run_id": result.run_id,
+            "dataset_id": result.default_dataset_id,
+            "item_count": len(result.items or []),
+            "items": result.items,
+            "estimated_cost_usd": result.estimated_cost_usd,
+        })
+    except ApifySafeStop as safe_stop:
+        return jsonify({
+            "error": str(safe_stop),
+            "error_type": "budget_safe_stop",
+            "paused": True,
+        }), 429
+    except (ApifyConfigError, Exception) as err:
+        msg, code = _normalize_apify_error(err)
+        return jsonify({"error": msg}), code
+
+
+@app.route("/api/enrichment", methods=["POST"])
+def enrichment():
+    data = request.json or {}
+    actor_input = data.get("actor_input")
+    if not isinstance(actor_input, dict):
+        actor_input = {
+            "company": (data.get("company") or "").strip(),
+            "position": (data.get("position") or "").strip(),
+            "contact_name": (data.get("contact_name") or "").strip(),
+            "source_url": (data.get("source_url") or "").strip(),
+            "discovery_run_id": (data.get("discovery_run_id") or "").strip(),
+        }
+
+    try:
+        service = ApifyClientService()
+        result = service.run_enrichment(actor_input=actor_input)
+        handoff = _extract_enrichment_handoff(result.items or [])
+        return jsonify({
+            "success": True,
+            "status": result.status,
+            "run_id": result.run_id,
+            "dataset_id": result.default_dataset_id,
+            "item_count": len(result.items or []),
+            "items": result.items,
+            "handoff": handoff,
+            "estimated_cost_usd": result.estimated_cost_usd,
+        })
+    except ApifySafeStop as safe_stop:
+        return jsonify({
+            "error": str(safe_stop),
+            "error_type": "budget_safe_stop",
+            "paused": True,
+        }), 429
+    except (ApifyConfigError, Exception) as err:
+        msg, code = _normalize_apify_error(err)
+        return jsonify({"error": msg}), code
 
 
 @app.route("/api/send", methods=["POST"])

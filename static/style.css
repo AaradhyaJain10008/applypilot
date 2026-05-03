@@ -581,6 +581,113 @@ button {
     transform: none;
 }
 
+.btn-secondary {
+    background: linear-gradient(135deg, #334155, #1e293b);
+    color: #f8fafc;
+    box-shadow: 0 10px 20px -10px rgba(15, 23, 42, 0.6);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 25px -10px rgba(15, 23, 42, 0.7);
+}
+
+.btn-secondary:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.scout-panel {
+    margin-top: 0.9rem;
+    padding: 0.85rem 0.95rem;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: rgba(15, 23, 42, 0.35);
+}
+
+.scout-status {
+    margin-top: 0.55rem;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: rgba(226, 232, 240, 0.75);
+}
+
+.scout-status code {
+    font-size: 0.72rem;
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 4px;
+    padding: 0.05rem 0.25rem;
+}
+
+.scout-results {
+    margin-top: 0.65rem;
+    max-height: 220px;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+}
+
+.scout-row {
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-start;
+    padding: 0.55rem 0.65rem;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    background: rgba(2, 6, 23, 0.35);
+    margin-bottom: 0.45rem;
+}
+
+.scout-row-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.scout-row-title {
+    font-weight: 600;
+    font-size: 0.92rem;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.scout-row-meta {
+    margin-top: 0.2rem;
+    font-size: 0.76rem;
+    color: rgba(148, 163, 184, 0.95);
+}
+
+.scout-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.08rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    color: rgba(226, 232, 240, 0.9);
+}
+
+.scout-chip.linkedin { border-color: rgba(56, 189, 248, 0.45); color: #7dd3fc; }
+.scout-chip.greenhouse { border-color: rgba(52, 211, 153, 0.45); color: #6ee7b7; }
+
+.scout-mini-btn {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 0.55rem 0.85rem;
+    font-size: 0.82rem;
+    border-radius: 10px;
+    background: rgba(212, 175, 55, 0.15);
+    color: var(--gold);
+    border: 1px solid rgba(212, 175, 55, 0.35);
+    box-shadow: none;
+}
+
+.scout-mini-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    background: rgba(212, 175, 55, 0.22);
+}
+
 .action-footer {
     margin-top: 2rem;
 }

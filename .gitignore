@@ -55,6 +55,12 @@ resumes/*.PDF
 data/job_tracker.csv
 data/ai_usage_log.csv
 data/scheduled_emails.json
+# Apify (local runs, budget estimates — never publish)
+data/apify_budget_state.json
+data/apify_warnings.jsonl
+data/discovery_results.jsonl
+data/enrichment_results.jsonl
+data/job_scout_runs.jsonl
 # Legacy paths from older versions of the project — keep them ignored too.
 Aaradhya_Job_Tracker.csv
 AI_Usage_Log.csv

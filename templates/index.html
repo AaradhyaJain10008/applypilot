@@ -33,6 +33,13 @@
                     <label for="jd">Job Description (Add Company name at the very top if ambiguous)</label>
                     <textarea id="jd" placeholder="Paste the full job description here..."></textarea>
                 </div>
+
+                <div class="scout-panel">
+                    <button id="jobScoutBtn" type="button" class="btn-secondary scout-btn">🔭 Scout recent “analyst” jobs (LinkedIn + Greenhouse)</button>
+                    <p id="jobScoutStatus" class="scout-status">Uses Apify: LinkedIn keywords=<strong>analyst</strong> only; timeframe from <code>SCOUT_LINKEDIN_POSTED_SECONDS</code> (default 10000s in the LinkedIn URL’s <code>f_TPR</code> segment).</p>
+                    <div id="jobScoutResults" class="scout-results hidden" aria-live="polite"></div>
+                </div>
+
                 <button id="analyzeBtn" class="btn-primary">Deep Strategic Analysis</button>
                 <!-- Escape hatch: if analysis is hanging or the user already knows
                      the company/role and just wants to send outreach, skip Step 2
