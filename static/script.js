@@ -50,8 +50,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // App config (loaded once on page load) — used for affinity-search slug,
     // signoff name, feature flags, etc. so this file ships zero personal data.
-    let APP_CONFIG = { ui: {}, candidate: {}, features: {}, alumni: { enabled: false, school_slug: '' } };
-    fetch('/api/config').then(r => r.json()).then(cfg => { APP_CONFIG = cfg || APP_CONFIG; }).catch(() => {});
+    let APP_CONFIG = {
+        ui: {},
+        candidate: {},
+        features: {},
+        alumni: { enabled: false, school_slug: '' },
+        job_scout: {},
+    };
+
+    const renderJobScoutHelp = () => {
+        const el = document.getElementById('jobScoutHelp');
+        if (!el) return;
+        const js = APP_CONFIG.job_scout || {};
+        el.textContent = '';
+        const p1 = document.createElement('p');
+        p1.className = 'scout-help-line';
+        p1.appendChild(document.createTextNode('This template is tested with the Apify actor '));
+        const a = document.createElement('a');
+        a.href = js.linkedin_actor_store_url || 'https://apify.com/curious_coder/linkedin-jobs-scraper';
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = js.linkedin_actor_recommended_id || 'curious_coder/linkedin-jobs-scraper';
+        p1.appendChild(a);
+        p1.appendChild(document.createTextNode(
+            '. Set APIFY_ACTOR_LINKEDIN_JOBS_ID to that ID (or point APIFY_ACTOR_DISCOVERY_ID at the same actor). '
+        ));
+        el.appendChild(p1);
+        const p2 = document.createElement('p');
+        p2.className = 'scout-help-line scout-help-muted';
+        const cfgId = js.linkedin_actor_configured_id;
+        if (cfgId) {
+            p2.appendChild(document.createTextNode(`Your .env currently uses LinkedIn actor: ${cfgId}. `));
+        } else {
+            p2.appendChild(document.createTextNode('LinkedIn actor is not set in .env yet — add a token and actor ID to enable scouting. '));
+        }
+        if (js.greenhouse_actor_configured_id) {
+            p2.appendChild(document.createTextNode(`Greenhouse actor: ${js.greenhouse_actor_configured_id}.`));
+        } else {
+            p2.appendChild(document.createTextNode('Greenhouse is optional; leave APIFY_ACTOR_GREENHOUSE_JOBS_ID blank to skip it.'));
+        }
+        el.appendChild(p2);
+    };
+
+    fetch('/api/config')
+        .then((r) => r.json())
+        .then((cfg) => {
+            APP_CONFIG = cfg || APP_CONFIG;
+            const hint = (APP_CONFIG.job_scout && APP_CONFIG.job_scout.default_keyword_hint) || '';
+            const kwEl = document.getElementById('jobScoutKeyword');
+            if (kwEl && hint && !(kwEl.value || '').trim()) {
+                kwEl.value = hint;
+            }
+            renderJobScoutHelp();
+        })
+        .catch(() => {
+            renderJobScoutHelp();
+        });
     
     // Draft Action Fields
     const contactNameInput = document.getElementById('contactName');
@@ -237,7 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Fields whose text content we want to restore verbatim.
     const SESSION_TEXT_FIELDS = [
         'jd', 'company', 'position', 'contactName', 'targetEmail', 'targetEmailInline',
-        'connectionNote', 'subject', 'body', 'coverLetterText',
+        'connectionNote', 'subject', 'body', 'coverLetterText', 'jobScoutKeyword',
     ];
     // Dropdowns that should round-trip too.
     const SESSION_SELECT_FIELDS = [
@@ -787,8 +841,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Step 1: one-click scout for postings (keyword fixed to analyst on the backend default).
     const jobScoutBtn = document.getElementById('jobScoutBtn');
+    const jobScoutKeyword = document.getElementById('jobScoutKeyword');
     const jobScoutStatus = document.getElementById('jobScoutStatus');
     const jobScoutResults = document.getElementById('jobScoutResults');
 
@@ -824,7 +878,7 @@ document.addEventListener('DOMContentLoaded', () => {
             jobScoutResults.classList.remove('hidden');
             jobScoutResults.innerHTML =
                 `<div class="scout-row"><div class="scout-row-main"><div class="scout-row-title">No listings returned</div>` +
-                `<div class="scout-row-meta">Actors may require different JSON input shapes — tune <code>APIFY_LINKEDIN_JOBS_INPUT_JSON</code> / <code>APIFY_GREENHOUSE_JOBS_INPUT_JSON</code> for your actors.</div></div></div>`;
+                `<div class="scout-row-meta">Try broader or different keywords, check <code>SCOUT_LINKEDIN_POSTED_SECONDS</code> / <code>SCOUT_LINKEDIN_GEO_ID</code>, or tune <code>APIFY_LINKEDIN_JOBS_INPUT_JSON</code> / <code>APIFY_GREENHOUSE_JOBS_INPUT_JSON</code> for your Apify actors.</div></div></div>`;
             return;
         }
 
@@ -902,16 +956,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const runJobPostingScout = async () => {
         if (!jobScoutBtn) return;
+        const keyword = (jobScoutKeyword && jobScoutKeyword.value || '').trim();
+        if (!keyword) {
+            alert('Enter job search keywords first (your field, role level, internship vs full-time, etc.).');
+            if (jobScoutKeyword) jobScoutKeyword.focus();
+            return;
+        }
         jobScoutBtn.disabled = true;
         if (jobScoutResults) jobScoutResults.classList.add('hidden');
         if (jobScoutStatus) {
             jobScoutStatus.textContent = 'Scouting recent listings via Apify (this may take ~30–90s)...';
         }
+        saveSession();
         try {
             const resp = await fetch('/api/scout/jobs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keyword: 'analyst' }),
+                body: JSON.stringify({ keyword }),
             });
             const data = await resp.json();
             if (!resp.ok) {

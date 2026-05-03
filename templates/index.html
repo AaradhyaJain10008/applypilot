@@ -35,8 +35,15 @@
                 </div>
 
                 <div class="scout-panel">
-                    <button id="jobScoutBtn" type="button" class="btn-secondary scout-btn">🔭 Scout recent “analyst” jobs (LinkedIn + Greenhouse)</button>
-                    <p id="jobScoutStatus" class="scout-status">Uses Apify: LinkedIn keywords=<strong>analyst</strong> only; timeframe from <code>SCOUT_LINKEDIN_POSTED_SECONDS</code> (default 10000s in the LinkedIn URL’s <code>f_TPR</code> segment).</p>
+                    <label for="jobScoutKeyword" class="scout-keyword-label">Job search keywords</label>
+                    <input type="text" id="jobScoutKeyword" class="scout-keyword-input"
+                        maxlength="280"
+                        placeholder="e.g. software engineer internship, ICU nurse, civil engineer entry level"
+                        autocomplete="off"
+                        aria-describedby="jobScoutHelp jobScoutStatus" />
+                    <div id="jobScoutHelp" class="scout-help" role="note"></div>
+                    <button id="jobScoutBtn" type="button" class="btn-secondary scout-btn">🔭 Scout recent jobs (LinkedIn · optional Greenhouse)</button>
+                    <p id="jobScoutStatus" class="scout-status">Uses your keywords in a LinkedIn jobs search URL; recency window from <code>SCOUT_LINKEDIN_POSTED_SECONDS</code> (<code>f_TPR</code>). Greenhouse runs only if <code>APIFY_ACTOR_GREENHOUSE_JOBS_ID</code> is set.</p>
                     <div id="jobScoutResults" class="scout-results hidden" aria-live="polite"></div>
                 </div>
 

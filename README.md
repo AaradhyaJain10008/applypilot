@@ -10,6 +10,8 @@ A self-hosted Flask app that:
 
 It runs locally, calls the AI providers *you* configure (Groq, Cerebras, Gemini, GitHub Models, Ollama — whichever keys you have), and keeps your personal data on your machine.
 
+Configure your **own job titles and resume personas** — nothing in the flow is tied to a single career track. The bundled JSON examples sometimes mention analytics personas; swap them for *your* field and PDFs.
+
 ---
 
 ## Why a Public Template?
@@ -60,6 +62,14 @@ resumes/ai_professional_resume.pdf
 ```
 
 You can rename / add / remove PDFs — just keep `resume_personas.json` in sync.
+
+### Job posting scout (optional, Apify)
+
+Step 1 can fetch recent listings from a **LinkedIn jobs search URL** via [Apify](https://apify.com/). This repo is tested with Actor **`curious_coder/linkedin-jobs-scraper`** ([store page](https://apify.com/curious_coder/linkedin-jobs-scraper)): build the search in your browser (keywords, location, date posted), copy the URL pattern, and the app fills `urls` + `count` in the format that Actor expects.
+
+- **Keywords** are whatever *you* type (any major or role — not hardcoded).
+- Optional **Greenhouse** requires a separate board/listing Actor; set `APIFY_ACTOR_GREENHOUSE_JOBS_ID` or leave it unset to skip.
+- See `.env.example` for `SCOUT_*` tuning (recency window, geo, caps).
 
 ### 5. Run
 

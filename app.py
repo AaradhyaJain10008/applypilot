@@ -2862,11 +2862,20 @@ def scout_jobs():
     """
     Pull recent postings (LinkedIn jobs search + optional Greenhouse actor).
 
-    Frontend uses keyword "analyst" by default; LinkedIn timeframe is encoded as
-    f_TPR=r<seconds> — default SecondsPostFilter uses 10000 (user preference vs 86400).
+    Keyword comes from the request body first, then SCOUT_JOB_KEYWORD_DEFAULT in .env.
+    LinkedIn time window uses f_TPR=r<seconds> (see SCOUT_LINKEDIN_POSTED_SECONDS).
     """
     data = request.json or {}
-    keyword = (data.get("keyword") or os.getenv("SCOUT_JOB_KEYWORD_DEFAULT", "analyst")).strip() or "analyst"
+    keyword = (data.get("keyword") or os.getenv("SCOUT_JOB_KEYWORD_DEFAULT", "")).strip()
+    if not keyword:
+        return jsonify(
+            {
+                "error": (
+                    "Enter job search keywords in Step 1, or set SCOUT_JOB_KEYWORD_DEFAULT in "
+                    "your .env file (e.g. your role, \"mechanical engineer intern\", \"ICU nurse\")."
+                )
+            }
+        ), 400
     try:
         max_items = max(1, min(int(data.get("max_items") or os.getenv("SCOUT_JOB_MAX_ITEMS", "80")), 10000))
     except Exception:
@@ -3165,6 +3174,15 @@ def app_config():
     """Lightweight config blob exposing UI-relevant settings + profile metadata.
     The frontend reads this on load to wire up affinity buttons, signoff names,
     feature flags, etc., without ever embedding personal info in HTML/JS files."""
+    actor_li = (
+        (os.getenv("APIFY_ACTOR_LINKEDIN_JOBS_ID") or "").strip()
+        or (os.getenv("APIFY_ACTOR_JOB_SCOUT_LINKEDIN_ID") or "").strip()
+        or (os.getenv("APIFY_ACTOR_DISCOVERY_ID") or "").strip()
+    )
+    greenhouse_id = (
+        (os.getenv("APIFY_ACTOR_GREENHOUSE_JOBS_ID") or "").strip()
+        or (os.getenv("APIFY_ACTOR_GREENHOUSE_ID") or "").strip()
+    )
     return jsonify({
         "ui": {
             "app_title": APP_SETTINGS.ui_text("app_title", "Career Command Center"),
@@ -3190,6 +3208,14 @@ def app_config():
             "label": PROFILE.alumni_button_label,
             "emoji": PROFILE.alumni_button_emoji,
             "school_slug": PROFILE.alumni_school_slug,
+        },
+        # Job scout: documented defaults so clones know which Actors this template targets.
+        "job_scout": {
+            "default_keyword_hint": (os.getenv("SCOUT_JOB_KEYWORD_DEFAULT") or "").strip(),
+            "linkedin_actor_recommended_id": "curious_coder/linkedin-jobs-scraper",
+            "linkedin_actor_store_url": "https://apify.com/curious_coder/linkedin-jobs-scraper",
+            "linkedin_actor_configured_id": actor_li or None,
+            "greenhouse_actor_configured_id": greenhouse_id or None,
         },
     })
 

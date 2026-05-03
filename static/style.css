@@ -606,6 +606,65 @@ button {
     background: rgba(15, 23, 42, 0.35);
 }
 
+.scout-keyword-label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: rgba(226, 232, 240, 0.9);
+    margin-bottom: 0.35rem;
+}
+
+.scout-keyword-input {
+    width: 100%;
+    margin-bottom: 0.55rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid rgba(212, 175, 55, 0.22);
+    background: rgba(15, 23, 42, 0.75);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.95rem;
+}
+
+.scout-keyword-input::placeholder {
+    color: rgba(148, 163, 184, 0.75);
+}
+
+.scout-keyword-input:focus {
+    outline: none;
+    border-color: var(--input-focus);
+    box-shadow: 0 0 12px rgba(212, 175, 55, 0.12);
+}
+
+.scout-help {
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: rgba(203, 213, 225, 0.88);
+    margin-bottom: 0.65rem;
+}
+
+.scout-help-line {
+    margin: 0 0 0.35rem 0;
+}
+
+.scout-help-line:last-child {
+    margin-bottom: 0;
+}
+
+.scout-help-muted {
+    opacity: 0.88;
+}
+
+.scout-help a {
+    color: #7dd3fc;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.scout-help a:hover {
+    color: #bae6fd;
+}
+
 .scout-status {
     margin-top: 0.55rem;
     font-size: 0.75rem;
