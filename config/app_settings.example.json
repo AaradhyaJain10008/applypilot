@@ -4,7 +4,9 @@
     "enable_followup_agent": true,
     "enable_email_sending": true,
     "enable_email_scheduling": true,
-    "enable_alumni_search_button": false
+    "enable_alumni_search_button": false,
+    "enable_resume_keyword_experiment": true,
+    "enable_scout_from_resumes": true
   },
   "ui": {
     "app_title": "Career Command Center",

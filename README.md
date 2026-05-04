@@ -67,9 +67,16 @@ You can rename / add / remove PDFs — just keep `resume_personas.json` in sync.
 
 Step 1 can fetch recent listings from a **LinkedIn jobs search URL** via [Apify](https://apify.com/). This repo is tested with Actor **`curious_coder/linkedin-jobs-scraper`** ([store page](https://apify.com/curious_coder/linkedin-jobs-scraper)): build the search in your browser (keywords, location, date posted), copy the URL pattern, and the app fills `urls` + `count` in the format that Actor expects.
 
-- **Keywords** are whatever *you* type (any major or role — not hardcoded).
+- **Keywords** can be typed in Step 1, *or* with **`features.enable_scout_from_resumes`: true** you can leave the field empty and press **Scout** — the app reads your resume PDFs, asks the AI for a **`primary_linkedin_search`** string, then runs Apify (same **`SCOUT_LINKEDIN_POSTED_SECONDS`** / geo filters as always).
 - Optional **Greenhouse** requires a separate board/listing Actor; set `APIFY_ACTOR_GREENHOUSE_JOBS_ID` or leave it unset to skip.
 - See `.env.example` for `SCOUT_*` tuning (recency window, geo, caps).
+
+### Experiment: AI keywords from your resumes (optional)
+
+When **`features.enable_resume_keyword_experiment`** is `true` in `config/app_settings.json`, Step 1 shows a dashed **Experiment** panel. It reads **every** resume PDF listed in `resume_personas.json`, extracts text (requires **`pypdf`** — see `requirements.txt`), and calls your normal AI provider chain to suggest **LinkedIn search phrases** and **target role titles** per persona plus a combined list.
+
+- **Undo:** set `enable_resume_keyword_experiment` to `false` and restart — the UI and `POST /api/experiment/resume-keywords` return 404.
+- Optional env: **`TASK_CHAIN_RESUME_KEYWORDS`** (defaults to `TASK_CHAIN_ANALYZE`), **`RESUME_KEYWORD_MAX_CHARS_PER_PDF`** (default `6000`) to truncate long PDFs.
 
 ### 5. Run
 

@@ -25,6 +25,7 @@ from send_email import send_email
 from log_job import log_job
 from config_loader import load_app_settings, load_profile, load_resume_personas
 from services.apify_client import ApifyClientService, ApifySafeStop, ApifyConfigError
+from services.resume_text import extract_pdf_text, ResumePdfError
 
 # override=True ensures that edits to .env take effect on every Flask reload,
 # rather than being shadowed by stale values inherited from the parent process env.
@@ -119,6 +120,8 @@ TASK_CHAIN_DRAFT = _parse_chain(os.getenv("TASK_CHAIN_DRAFT"), _DEFAULT_CHAIN)
 TASK_CHAIN_NOTE = _parse_chain(os.getenv("TASK_CHAIN_NOTE"), _DEFAULT_CHAIN)
 TASK_CHAIN_ASK = _parse_chain(os.getenv("TASK_CHAIN_ASK"), _DEFAULT_CHAIN)
 TASK_CHAIN_COVER = _parse_chain(os.getenv("TASK_CHAIN_COVER"), _DEFAULT_CHAIN)
+# Optional: override provider chain for the resume-keyword experiment (defaults to analyze chain).
+TASK_CHAIN_RESUME_KEYWORDS = _parse_chain(os.getenv("TASK_CHAIN_RESUME_KEYWORDS"), TASK_CHAIN_ANALYZE)
 
 
 def _resolve_runtime_path(path, fallback):
@@ -459,6 +462,10 @@ def _provider_timeout_for_task(provider, task):
         return AI_TIMEOUT_NOTE
     if task == "ask":
         return AI_TIMEOUT_ASK
+    if task == "resume_keywords":
+        if p == "ollama":
+            return AI_TIMEOUT_ANALYZE_OLLAMA
+        return AI_TIMEOUT_ANALYZE
     return 30
 
 
@@ -1026,10 +1033,17 @@ def _extract_job_candidates_from_items(source: str, items: list) -> list:
             company = comp_val or ""
         url = (
             raw.get("url")
+            or raw.get("absoluteUrl")
+            or raw.get("absolute_url")
+            or raw.get("postingUrl")
+            or raw.get("posting_url")
+            or raw.get("hostedUrl")
+            or raw.get("hosted_url")
             or raw.get("jobUrl")
             or raw.get("jobPostingUrl")
             or raw.get("link")
             or raw.get("applyUrl")
+            or raw.get("apply_url")
             or ""
         )
         posted = raw.get("postedAt") or raw.get("postedTime") or raw.get("posted") or ""
@@ -1075,6 +1089,280 @@ def _merge_jobs_by_url(records: list) -> list:
         item.pop("raw", None)
         merged.append(item)
     return merged
+
+
+def _haystack_for_scout_job(job: dict) -> tuple[str, str]:
+    """Full-text haystack plus title-only substring for persona matching (local, fast)."""
+    title = str(job.get("title") or "")
+    company = str(job.get("company") or "")
+    desc = str(job.get("description") or "")[:1400]
+    blob = f"{title} {company} {desc}".lower()
+    return blob, title.lower()
+
+
+def _score_scout_job_against_personas(job: dict) -> tuple[float, list[str]]:
+    """
+    Lightweight overlap score vs resume_personas triggers + core_stack.
+    NOT an LLM fit score — ranks listings so likely matches float up without extra API calls.
+    """
+    hay, title_l = _haystack_for_scout_job(job)
+    raw = 0.0
+    hints: list[str] = []
+
+    def _note(code: str, phrase: str) -> None:
+        tag = f"{code}: matched \"{phrase[:48]}\""
+        if len(hints) < 10:
+            hints.append(tag)
+
+    for persona in PERSONAS.personas:
+        code = str(persona.get("code") or "").strip().upper() or "?"
+        for tr in persona.get("triggers") or []:
+            t = str(tr).strip().lower()
+            if len(t) < 3:
+                continue
+            if t not in hay:
+                continue
+            w = min(14.0, 2.5 + len(t) * 0.45)
+            if t in title_l:
+                w += 5.0
+            raw += w
+            _note(code, t)
+        for stk in persona.get("core_stack") or []:
+            s = str(stk).strip().lower()
+            if not s:
+                continue
+            for piece in re.split(r"[,;/]+", s):
+                piece = piece.strip().lower()
+                if len(piece) < 2:
+                    continue
+                if piece not in hay:
+                    continue
+                w = min(10.0, 2.0 + len(piece) * 0.35)
+                if piece in title_l:
+                    w += 3.0
+                raw += w
+                _note(code, piece)
+        label = str(persona.get("label") or "").strip()
+        lbl = label.lower()
+        if len(lbl) >= 5 and lbl in hay:
+            raw += min(18.0, 5.0 + len(lbl) * 0.2)
+            if lbl in title_l:
+                raw += 6.0
+            _note(code, label[:40])
+
+    return raw, hints
+
+
+def _rank_scout_jobs_by_personas(merged: list) -> list:
+    """Sort by persona keyword overlap (desc); add relevance_score 0–100 within this batch."""
+    if not merged:
+        return merged
+    scored = []
+    for row in merged:
+        raw_pts, hints = _score_scout_job_against_personas(row)
+        scored.append({"row": row, "raw": raw_pts, "hints": hints})
+    scored.sort(key=lambda x: (-x["raw"], (x["row"].get("title") or "").lower()))
+
+    raws = [x["raw"] for x in scored]
+    hi = max(raws)
+    lo = min(raws)
+
+    out: list = []
+    for item in scored:
+        row = item["row"]
+        r = item["raw"]
+        hints = item["hints"]
+        if hi > lo:
+            rel = int(round(100 * (r - lo) / (hi - lo)))
+        else:
+            rel = 82 if r > 0 else 38
+        row["relevance_score"] = max(0, min(100, rel))
+        row["relevance_hint"] = "; ".join(hints[:8]) if hints else (
+            "Limited overlap with your persona keywords in the listing text — "
+            "open the job or run Deep Strategic Analysis for a real fit score."
+        )
+        out.append(row)
+    return out
+
+
+def _gather_resume_keyword_blocks():
+    """Load every persona PDF into text blocks for resume→keyword AI. Returns (blocks, extraction_errors)."""
+    try:
+        max_per = max(500, int(os.getenv("RESUME_KEYWORD_MAX_CHARS_PER_PDF", "6000")))
+    except Exception:
+        max_per = 6000
+    blocks: list = []
+    extraction_errors: list = []
+    for code in sorted(PERSONAS.codes):
+        rel = RESUMES.get(code)
+        if not rel:
+            continue
+        full = rel if os.path.isabs(rel) else os.path.join(PROJECT_ROOT, rel)
+        meta = PERSONAS.get(code) or {}
+        label = (meta.get("label") or code).strip()
+        try:
+            resume_text = extract_pdf_text(full, max_chars=max_per)
+        except ResumePdfError as err:
+            extraction_errors.append({"code": code, "error": str(err)})
+            continue
+        blocks.append({
+            "code": code,
+            "label": label,
+            "triggers": meta.get("triggers") or [],
+            "core_stack": meta.get("core_stack") or [],
+            "resume_text": resume_text,
+        })
+    return blocks, extraction_errors
+
+
+def _build_resume_keyword_experiment_prompt(blocks: list) -> str:
+    """blocks: list of {code, label, triggers, core_stack, resume_text}"""
+    lines = [
+        "You are an expert career advisor. The candidate has multiple resume PDF variants (personas).",
+        "Each block below includes CONFIG hints (triggers, stack) plus EXTRACTED TEXT from their PDF.",
+        "",
+        "TASK: For every persona, infer realistic LinkedIn job-search keyword phrases and target job titles.",
+        "Also produce a combined list that spans all personas (for broad discovery).",
+        "",
+        "RULES:",
+        "- Return ONLY valid JSON (no markdown fences).",
+        '- "linkedin_search_phrases" must be short strings a human would type into LinkedIn Jobs search.',
+        '- "primary_linkedin_search" must be ONE concise string (under ~120 chars) that best matches ',
+        "  ALL personas together — this will be pasted into LinkedIn Jobs search as-is.",
+        "- Do not invent company names, job posting URLs, or employers.",
+        "- Ground every suggestion in the resume text; note gaps honestly in \"notes\".",
+        "- Prefer inclusive, modern job-market language; avoid limiting the candidate to one narrow niche unless the resume clearly supports it.",
+        "",
+        "REQUIRED JSON SHAPE:",
+        "{",
+        '  "primary_linkedin_search": "single best LinkedIn Jobs query for all personas",',
+        '  "per_persona": [',
+        "    {",
+        '      "code": "DA",',
+        '      "label": "string",',
+        '      "linkedin_search_phrases": ["string", "..."],',
+        '      "target_role_titles": ["string", "..."],',
+        '      "one_line_focus": "string"',
+        "    }",
+        "  ],",
+        '  "combined_top_keywords": ["string", "..."],',
+        '  "combined_role_families": ["string", "..."],',
+        '  "notes": "string"',
+        "}",
+        "",
+        "========== PERSONA BLOCKS ==========",
+    ]
+    for b in blocks:
+        lines.append("----------------------------------------------------------------")
+        lines.append(f"CODE: {b.get('code')}")
+        lines.append(f"LABEL: {b.get('label')}")
+        if b.get("triggers"):
+            lines.append("CONFIG TRIGGERS: " + "; ".join(str(t) for t in b["triggers"][:25]))
+        if b.get("core_stack"):
+            lines.append("CONFIG CORE STACK: " + "; ".join(str(s) for s in b["core_stack"]))
+        lines.append("RESUME TEXT:")
+        lines.append(b.get("resume_text") or "(empty)")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _normalize_resume_keyword_result(raw: dict) -> dict:
+    out = dict(raw) if isinstance(raw, dict) else {}
+    per = out.get("per_persona")
+    if not isinstance(per, list):
+        per = []
+    cleaned = []
+    for row in per:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("code") or "").strip().upper()
+        if not code:
+            continue
+        phrases = row.get("linkedin_search_phrases") or row.get("search_phrases") or []
+        titles = row.get("target_role_titles") or row.get("roles") or []
+        if not isinstance(phrases, list):
+            phrases = []
+        if not isinstance(titles, list):
+            titles = []
+        cleaned.append({
+            "code": code,
+            "label": str(row.get("label") or "").strip(),
+            "linkedin_search_phrases": [str(x).strip() for x in phrases if str(x).strip()][:12],
+            "target_role_titles": [str(x).strip() for x in titles if str(x).strip()][:12],
+            "one_line_focus": str(row.get("one_line_focus") or "").strip(),
+        })
+    out["per_persona"] = cleaned
+    ck = out.get("combined_top_keywords")
+    if not isinstance(ck, list):
+        ck = []
+    out["combined_top_keywords"] = [str(x).strip() for x in ck if str(x).strip()][:20]
+    cr = out.get("combined_role_families")
+    if not isinstance(cr, list):
+        cr = []
+    out["combined_role_families"] = [str(x).strip() for x in cr if str(x).strip()][:15]
+    out["notes"] = str(out.get("notes") or "").strip()
+    out["primary_linkedin_search"] = str(out.get("primary_linkedin_search") or "").strip()[:220]
+    return out
+
+
+def _primary_linkedin_search_pick(norm: dict) -> str:
+    """Prefer model's primary string; fallback to combined or per-persona phrases."""
+    p = (norm or {}).get("primary_linkedin_search") or ""
+    p = str(p).strip()
+    if p:
+        return p[:220]
+    for x in (norm or {}).get("combined_top_keywords") or []:
+        s = str(x).strip()
+        if s:
+            return s[:220]
+    for row in (norm or {}).get("per_persona") or []:
+        for ph in row.get("linkedin_search_phrases") or []:
+            s = str(ph).strip()
+            if s:
+                return s[:220]
+    return ""
+
+
+def _run_resume_keyword_ai(blocks: list, *, usage_log_endpoint: str):
+    """Call provider chain once; returns (normalized_dict, response_text, provider, model_used)."""
+    if not blocks:
+        raise ValueError("No resume blocks to analyze.")
+    prompt = _build_resume_keyword_experiment_prompt(blocks)
+    provider = TASK_CHAIN_RESUME_KEYWORDS[0] if TASK_CHAIN_RESUME_KEYWORDS else "groq"
+    model_used = ""
+
+    def _on_attempt_error(p, pr, err, lat_ms):
+        _log_ai_usage(
+            usage_log_endpoint,
+            p,
+            "unknown",
+            pr,
+            "",
+            lat_ms,
+            status="error",
+            error_code=str(err),
+        )
+
+    started = time.time()
+    response_text, model_used, provider, _, _attempted = _run_provider_chain(
+        task="resume_keywords",
+        chain=TASK_CHAIN_RESUME_KEYWORDS,
+        prompt_builder=lambda _p: prompt,
+        expect_json=True,
+        on_error_log=_on_attempt_error,
+    )
+    response_text = _strip_markdown_fences(response_text)
+    parsed = json.loads(response_text)
+    normalized = _normalize_resume_keyword_result(parsed)
+    _log_ai_usage(
+        usage_log_endpoint,
+        provider,
+        model_used,
+        prompt,
+        response_text,
+        (time.time() - started) * 1000,
+    )
+    return normalized, response_text, provider, model_used
 
 
 # Disable Gemini SDK's internal retry so a 429 (quota) error surfaces immediately
@@ -2862,17 +3150,73 @@ def scout_jobs():
     """
     Pull recent postings (LinkedIn jobs search + optional Greenhouse actor).
 
-    Keyword comes from the request body first, then SCOUT_JOB_KEYWORD_DEFAULT in .env.
+    Keyword resolution (first match wins):
+      1) Request body "keyword" (manual override)
+      2) If features.enable_scout_from_resumes: read all resume PDFs → AI → primary_linkedin_search
+      3) SCOUT_JOB_KEYWORD_DEFAULT in .env
+
     LinkedIn time window uses f_TPR=r<seconds> (see SCOUT_LINKEDIN_POSTED_SECONDS).
     """
     data = request.json or {}
-    keyword = (data.get("keyword") or os.getenv("SCOUT_JOB_KEYWORD_DEFAULT", "")).strip()
-    if not keyword:
+    manual_kw = (data.get("keyword") or "").strip()
+    env_kw = (os.getenv("SCOUT_JOB_KEYWORD_DEFAULT") or "").strip()
+    resume_driven_meta = None
+    keyword = ""
+    keyword_source = ""
+
+    if manual_kw:
+        keyword = manual_kw
+        keyword_source = "manual"
+    elif APP_SETTINGS.feature("enable_scout_from_resumes", False):
+        blocks, extraction_errors = _gather_resume_keyword_blocks()
+        if not blocks:
+            return jsonify({
+                "error": (
+                    "Resume-driven scout needs readable PDF text from your personas. "
+                    "Check resumes/ + config/resume_personas.json and install pypdf."
+                ),
+                "extraction_errors": extraction_errors,
+            }), 400
+        try:
+            normalized, _rt, prov, mod = _run_resume_keyword_ai(
+                blocks,
+                usage_log_endpoint="/api/scout/jobs",
+            )
+        except Exception as err:
+            msg, code = _friendly_ai_error(err, "AI could not derive search keywords from resumes")
+            return jsonify({"error": msg, "extraction_errors": extraction_errors}), code
+        keyword = _primary_linkedin_search_pick(normalized)
+        if not keyword:
+            return jsonify({
+                "error": "AI response had no usable primary_linkedin_search or fallback phrases.",
+                "extraction_errors": extraction_errors,
+                "resume_ai_preview": {
+                    "notes": normalized.get("notes"),
+                    "combined_top_keywords": normalized.get("combined_top_keywords"),
+                },
+            }), 502
+        resume_driven_meta = {
+            "primary_linkedin_search": keyword,
+            "personas_analyzed": [b["code"] for b in blocks],
+            "extraction_errors": extraction_errors,
+            "provider": prov,
+            "model": mod,
+            "ai_notes": normalized.get("notes"),
+            "combined_top_keywords": normalized.get("combined_top_keywords"),
+            "combined_role_families": normalized.get("combined_role_families"),
+            "per_persona": normalized.get("per_persona"),
+        }
+        keyword_source = "resume"
+    elif env_kw:
+        keyword = env_kw
+        keyword_source = "env_default"
+    else:
         return jsonify(
             {
                 "error": (
-                    "Enter job search keywords in Step 1, or set SCOUT_JOB_KEYWORD_DEFAULT in "
-                    "your .env file (e.g. your role, \"mechanical engineer intern\", \"ICU nurse\")."
+                    "No search keywords: type some in Step 1, set SCOUT_JOB_KEYWORD_DEFAULT in .env, "
+                    "or enable features.enable_scout_from_resumes in config/app_settings.json "
+                    "(uses your resume PDFs + AI)."
                 )
             }
         ), 400
@@ -2990,7 +3334,7 @@ def scout_jobs():
                     "error": str(safe_stop),
                     "error_type": "budget_safe_stop",
                     "paused": True,
-                    "partial_jobs": _merge_jobs_by_url(combined),
+                    "partial_jobs": _rank_scout_jobs_by_personas(_merge_jobs_by_url(combined)),
                     "warnings": warnings,
                 }
             ), 429
@@ -3001,21 +3345,69 @@ def scout_jobs():
     else:
         warnings.append("Greenhouse scout skipped — set APIFY_ACTOR_GREENHOUSE_JOBS_ID in .env.")
 
-    merged = _merge_jobs_by_url(combined)
-    merged.sort(key=lambda row: ((row.get("title") or "").lower(), (row.get("company") or "").lower()))
+    merged = _rank_scout_jobs_by_personas(_merge_jobs_by_url(combined))
 
-    return jsonify(
-        {
-            "success": True,
-            "keyword": keyword,
-            "linkedin_search_url": linkedin_url,
-            "posted_within_seconds": seconds_filter,
-            "max_items_per_source": max_items,
-            "jobs": merged,
-            "runs": results_meta,
-            "warnings": warnings,
-        }
-    )
+    payload = {
+        "success": True,
+        "keyword": keyword,
+        "keyword_source": keyword_source,
+        "linkedin_search_url": linkedin_url,
+        "posted_within_seconds": seconds_filter,
+        "max_items_per_source": max_items,
+        "jobs": merged,
+        "runs": results_meta,
+        "warnings": warnings,
+        "ranking_note": (
+            "Jobs are ordered by overlap with your resume_personas triggers/stacks (local text match, "
+            "no extra AI calls). Hover the % chip for why; Deep Strategic Analysis is the real fit score."
+        ),
+    }
+    if resume_driven_meta is not None:
+        payload["resume_driven_meta"] = resume_driven_meta
+    return jsonify(payload)
+
+
+@app.route("/api/experiment/resume-keywords", methods=["POST"])
+def experiment_resume_keywords():
+    """
+    EXPERIMENT: read all configured resume PDFs + persona metadata, call the AI
+    to suggest LinkedIn search phrases and target roles. Disable via
+    config/app_settings.json -> features.enable_resume_keyword_experiment.
+    """
+    if not APP_SETTINGS.feature("enable_resume_keyword_experiment", False):
+        return jsonify({
+            "error": (
+                "Resume keyword experiment is disabled. Set "
+                "features.enable_resume_keyword_experiment to true in "
+                "config/app_settings.json and restart the app."
+            ),
+        }), 404
+
+    blocks, extraction_errors = _gather_resume_keyword_blocks()
+    if not blocks:
+        return jsonify({
+            "error": (
+                "No resume text could be extracted. Ensure PDFs exist under resumes/ "
+                "and paths in config/resume_personas.json match. Install pypdf: pip install pypdf"
+            ),
+            "extraction_errors": extraction_errors,
+        }), 400
+
+    try:
+        result, _response_dump, provider, model_used = _run_resume_keyword_ai(
+            blocks,
+            usage_log_endpoint="/api/experiment/resume-keywords",
+        )
+        result["success"] = True
+        result["extraction_errors"] = extraction_errors
+        result["personas_analyzed"] = [b["code"] for b in blocks]
+        result["_experiment"] = True
+        result["provider"] = provider
+        result["model"] = model_used
+        return jsonify(result)
+    except Exception as err:
+        msg, code = _friendly_ai_error(err, "Resume keyword suggestions failed")
+        return jsonify({"error": msg, "extraction_errors": extraction_errors}), code
 
 
 @app.route("/api/discovery", methods=["POST"])
@@ -3201,6 +3593,14 @@ def app_config():
             "enable_alumni_search_button": (
                 PROFILE.alumni_search_enabled
                 and APP_SETTINGS.feature("enable_alumni_search_button", True)
+            ),
+            "enable_resume_keyword_experiment": APP_SETTINGS.feature(
+                "enable_resume_keyword_experiment",
+                False,
+            ),
+            "enable_scout_from_resumes": APP_SETTINGS.feature(
+                "enable_scout_from_resumes",
+                False,
             ),
         },
         "alumni": {

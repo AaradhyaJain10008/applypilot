@@ -6,3 +6,4 @@ python-docx==1.2.0
 reportlab==4.4.10
 # 1.x is incompatible with current apify-shared (ImportError). Use 2.x.
 apify-client>=2.5.0,<3
+pypdf>=5.0.0,<6

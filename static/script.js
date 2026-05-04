@@ -102,6 +102,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 kwEl.value = hint;
             }
             renderJobScoutHelp();
+            const expPanel = document.getElementById('resumeKeywordExperiment');
+            if (expPanel) {
+                const on = !!(APP_CONFIG.features && APP_CONFIG.features.enable_resume_keyword_experiment);
+                expPanel.classList.toggle('hidden', !on);
+            }
         })
         .catch(() => {
             renderJobScoutHelp();
@@ -321,27 +326,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let sessionSaveTimer = null;
     let cachedAnalysisResult = null; // raw API payload from last successful /api/analyze
+    /** Last successful job-scout listing payload (Apify); restored on refresh without re-scraping. */
+    let scoutSessionSnapshot = null;
+
+    const buildSessionPayload = () => {
+        const payload = {
+            ts: Date.now(),
+            fields: {},
+            selects: {},
+            visible: visibleState(),
+            analysis: cachedAnalysisResult || null,
+            scoutSnapshot: scoutSessionSnapshot,
+        };
+        SESSION_TEXT_FIELDS.forEach(id => { payload.fields[id] = readField(id); });
+        SESSION_SELECT_FIELDS.forEach(id => { payload.selects[id] = readField(id); });
+        return payload;
+    };
 
     const saveSession = () => {
         // Debounce so fast keystrokes don't thrash localStorage.
         clearTimeout(sessionSaveTimer);
         sessionSaveTimer = setTimeout(() => {
             try {
-                const payload = {
-                    ts: Date.now(),
-                    fields: {},
-                    selects: {},
-                    visible: visibleState(),
-                    analysis: cachedAnalysisResult || null,
-                };
-                SESSION_TEXT_FIELDS.forEach(id => { payload.fields[id] = readField(id); });
-                SESSION_SELECT_FIELDS.forEach(id => { payload.selects[id] = readField(id); });
-                localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+                localStorage.setItem(SESSION_KEY, JSON.stringify(buildSessionPayload()));
             } catch (err) {
                 // localStorage quota or privacy mode — silent failure is fine.
                 console.warn('Session save failed:', err);
             }
         }, 300);
+    };
+
+    /** Persist immediately (e.g. after scout completes) so a refresh never loses Apify results mid-debounce. */
+    const flushSessionNow = () => {
+        clearTimeout(sessionSaveTimer);
+        sessionSaveTimer = null;
+        try {
+            localStorage.setItem(SESSION_KEY, JSON.stringify(buildSessionPayload()));
+        } catch (err) {
+            console.warn('Session save failed:', err);
+        }
     };
 
     const loadSession = () => {
@@ -363,6 +386,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearSession = () => {
         try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
         cachedAnalysisResult = null;
+        scoutSessionSnapshot = null;
         lastScoutKey = '';
     };
 
@@ -477,6 +501,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const restoreSession = () => {
         const data = loadSession();
         if (!data) return;
+        scoutSessionSnapshot = (data.scoutSnapshot && typeof data.scoutSnapshot === 'object')
+            ? data.scoutSnapshot
+            : null;
         // Fields
         Object.entries(data.fields || {}).forEach(([id, val]) => writeField(id, val));
         // Selects (may race with the /api/resumes fetch — wait a beat)
@@ -871,6 +898,30 @@ document.addEventListener('DOMContentLoaded', () => {
         return parts.filter(Boolean).join('\n').trim();
     };
 
+    const SCOUT_JOB_DESC_LIMIT = 12000;
+    const pickScoutMetaForCache = (data) => {
+        if (!data || typeof data !== 'object') return {};
+        return {
+            linkedin_search_url: data.linkedin_search_url,
+            runs: data.runs || {},
+            ranking_note: data.ranking_note,
+            keyword: data.keyword,
+            keyword_source: data.keyword_source,
+            warnings: data.warnings,
+            resume_driven_meta: data.resume_driven_meta,
+        };
+    };
+    const sanitizeJobsForScoutCache = (jobs) =>
+        (Array.isArray(jobs) ? jobs : []).map((j) => {
+            if (!j || typeof j !== 'object') return j;
+            const j2 = { ...j };
+            if (typeof j2.description === 'string' && j2.description.length > SCOUT_JOB_DESC_LIMIT) {
+                j2.description = `${j2.description.slice(0, SCOUT_JOB_DESC_LIMIT)}…`;
+            }
+            delete j2.raw;
+            return j2;
+        });
+
     const renderJobScoutResults = (jobs, meta) => {
         if (!jobScoutResults) return;
         jobScoutResults.innerHTML = '';
@@ -889,9 +940,37 @@ document.addEventListener('DOMContentLoaded', () => {
             const main = document.createElement('div');
             main.className = 'scout-row-main';
 
+            const topWrap = document.createElement('div');
+            topWrap.className = 'scout-row-top';
+
+            const titleCol = document.createElement('div');
+            titleCol.style.flex = '1';
+            titleCol.style.minWidth = '0';
+
             const title = document.createElement('div');
             title.className = 'scout-row-title';
             title.textContent = job.title || '(untitled role)';
+            titleCol.appendChild(title);
+            topWrap.appendChild(titleCol);
+
+            if (typeof job.relevance_score === 'number') {
+                const relWrap = document.createElement('div');
+                relWrap.className = 'scout-rel-wrap';
+                const badge = document.createElement('span');
+                badge.className = 'scout-rel-badge';
+                const rs = job.relevance_score;
+                if (rs >= 70) badge.classList.add('rel-high');
+                else if (rs >= 40) badge.classList.add('rel-mid');
+                else badge.classList.add('rel-low');
+                badge.textContent = `${rs}%`;
+                badge.title = (job.relevance_hint || 'Overlap with resume_personas triggers — not the same as Deep Analysis fit.').slice(0, 500);
+                relWrap.appendChild(badge);
+                const sub = document.createElement('div');
+                sub.className = 'scout-rel-sub';
+                sub.textContent = 'persona overlap';
+                relWrap.appendChild(sub);
+                topWrap.appendChild(relWrap);
+            }
 
             const metaLine = document.createElement('div');
             metaLine.className = 'scout-row-meta';
@@ -910,7 +989,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 metaLine.appendChild(hint);
             }
 
-            main.appendChild(title);
+            main.appendChild(topWrap);
             main.appendChild(metaLine);
 
             const useBtn = document.createElement('button');
@@ -942,37 +1021,83 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         jobScoutResults.classList.remove('hidden');
+        const runs = (meta && meta.runs) || {};
+        const liMeta = runs.linkedin || (meta && meta.linkedin);
+        const ghMeta = runs.greenhouse || (meta && meta.greenhouse);
+        const liRun = liMeta && liMeta.run_id;
+        const ghRun = ghMeta && ghMeta.run_id;
         const runBits = [];
-        const liRun = meta && meta.linkedin && meta.linkedin.run_id;
-        const ghRun = meta && meta.greenhouse && meta.greenhouse.run_id;
         if (liRun) runBits.push(`LI run ${liRun}`);
         if (ghRun) runBits.push(`GH run ${ghRun}`);
-        if (jobScoutStatus && meta && meta.linkedin_search_url) {
-            const tail = runBits.length ? ` · ${runBits.join(' · ')}` : '';
-            jobScoutStatus.innerHTML =
-                `Search URL (time filter): <code style="font-size:0.7rem;">${meta.linkedin_search_url}</code>${tail}`;
+        if (jobScoutStatus && meta) {
+            jobScoutStatus.textContent = '';
+            const n = Array.isArray(jobs) ? jobs.length : 0;
+            let srcHint = '';
+            if (meta.keyword_source === 'resume') srcHint = ' (keywords from resumes + AI)';
+            else if (meta.keyword_source === 'env_default') srcHint = ' (from SCOUT_JOB_KEYWORD_DEFAULT)';
+            const sum = document.createElement('div');
+            sum.textContent = `Found ${n} listing(s), sorted by resume persona overlap.${srcHint}`.trim();
+            jobScoutStatus.appendChild(sum);
+            if (meta.ranking_note) {
+                const rn = document.createElement('div');
+                rn.style.marginTop = '0.25rem';
+                rn.style.opacity = '0.9';
+                rn.style.fontSize = '0.88rem';
+                rn.textContent = meta.ranking_note;
+                jobScoutStatus.appendChild(rn);
+            }
+            const warns = Array.isArray(meta.warnings) ? meta.warnings.filter(Boolean) : [];
+            if (meta.linkedin_search_url) {
+                const row = document.createElement('div');
+                const label = document.createTextNode('LinkedIn search (time filter): ');
+                row.appendChild(label);
+                const code = document.createElement('code');
+                code.style.fontSize = '0.7rem';
+                code.textContent = meta.linkedin_search_url;
+                row.appendChild(code);
+                if (runBits.length) {
+                    row.appendChild(document.createTextNode(` · ${runBits.join(' · ')}`));
+                }
+                jobScoutStatus.appendChild(row);
+            } else if (runBits.length) {
+                const row = document.createElement('div');
+                row.textContent = runBits.join(' · ');
+                jobScoutStatus.appendChild(row);
+            }
+            if (warns.length) {
+                const wrow = document.createElement('div');
+                wrow.style.marginTop = '0.35rem';
+                wrow.style.color = '#fbbf24';
+                wrow.style.fontSize = '0.85rem';
+                wrow.textContent = warns.join(' · ');
+                jobScoutStatus.appendChild(wrow);
+            }
         }
     };
 
     const runJobPostingScout = async () => {
         if (!jobScoutBtn) return;
         const keyword = (jobScoutKeyword && jobScoutKeyword.value || '').trim();
-        if (!keyword) {
-            alert('Enter job search keywords first (your field, role level, internship vs full-time, etc.).');
+        const smartScout = !!(APP_CONFIG.features && APP_CONFIG.features.enable_scout_from_resumes);
+        if (!keyword && !smartScout) {
+            alert('Enter job search keywords first, or enable features.enable_scout_from_resumes in config/app_settings.json and restart.');
             if (jobScoutKeyword) jobScoutKeyword.focus();
             return;
         }
         jobScoutBtn.disabled = true;
         if (jobScoutResults) jobScoutResults.classList.add('hidden');
         if (jobScoutStatus) {
-            jobScoutStatus.textContent = 'Scouting recent listings via Apify (this may take ~30–90s)...';
+            jobScoutStatus.textContent = keyword
+                ? 'Scouting listings via Apify (this may take ~30–90s)...'
+                : 'Reading resume PDFs → AI search phrase → Apify (often ~60–120s)...';
         }
         saveSession();
         try {
+            const body = keyword ? { keyword } : {};
             const resp = await fetch('/api/scout/jobs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keyword }),
+                body: JSON.stringify(body),
             });
             const data = await resp.json();
             if (!resp.ok) {
@@ -984,13 +1109,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 throw new Error(data.error || 'Scout failed');
             }
-            const warns = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
-            const warnTxt = warns.length ? ` ⚠️ ${warns.join(' · ')}` : '';
-            if (jobScoutStatus) {
-                jobScoutStatus.textContent =
-                    `Found ${(data.jobs || []).length} listing(s).${warnTxt}`.trim();
+            if (data.resume_driven_meta && jobScoutKeyword && data.keyword) {
+                jobScoutKeyword.value = data.keyword;
+                saveSession();
             }
             renderJobScoutResults(data.jobs || [], data);
+            try {
+                scoutSessionSnapshot = {
+                    jobs: sanitizeJobsForScoutCache(data.jobs || []),
+                    meta: pickScoutMetaForCache(data),
+                    statusHtml: jobScoutStatus ? jobScoutStatus.innerHTML : '',
+                    statusText: jobScoutStatus ? jobScoutStatus.textContent : '',
+                };
+                flushSessionNow();
+            } catch (e) {
+                console.warn('Scout session cache failed:', e);
+            }
         } catch (err) {
             if (jobScoutStatus) jobScoutStatus.textContent = `Scout error: ${err.message}`;
         } finally {
@@ -1000,6 +1134,204 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (jobScoutBtn) {
         jobScoutBtn.addEventListener('click', runJobPostingScout);
+    }
+
+    // Restore job scout panel after refresh (must run after renderJobScoutResults exists;
+    // primary restoreSession runs at 150ms and cannot call this helper).
+    const restoreJobScoutFromSession = () => {
+        const session = loadSession();
+        if (!session || !session.scoutSnapshot || !jobScoutResults) return;
+        const snap = session.scoutSnapshot;
+        if (!Array.isArray(snap.jobs)) return;
+        scoutSessionSnapshot = snap;
+        renderJobScoutResults(snap.jobs, snap.meta || {});
+        if (jobScoutStatus) {
+            if (snap.statusHtml) jobScoutStatus.innerHTML = snap.statusHtml;
+            else if (snap.statusText) jobScoutStatus.textContent = snap.statusText;
+        }
+    };
+    setTimeout(restoreJobScoutFromSession, 200);
+
+    const resumeKeywordExperimentBtn = document.getElementById('resumeKeywordExperimentBtn');
+
+    const renderResumeKeywordExperimentResults = (data) => {
+        const resEl = document.getElementById('resumeKeywordExperimentResults');
+        if (!resEl) return;
+        resEl.innerHTML = '';
+        resEl.classList.remove('hidden');
+
+        const primaryAi = (data.primary_linkedin_search || '').trim();
+        if (primaryAi) {
+            const block = document.createElement('div');
+            block.className = 'experiment-result-block';
+            const h = document.createElement('h4');
+            h.textContent = 'Primary LinkedIn query (AI)';
+            block.appendChild(h);
+            const p = document.createElement('p');
+            p.className = 'scout-help-line';
+            p.textContent = primaryAi;
+            block.appendChild(p);
+            resEl.appendChild(block);
+        }
+
+        const errs = data.extraction_errors || [];
+        if (errs.length) {
+            const warn = document.createElement('div');
+            warn.className = 'experiment-result-block';
+            const h = document.createElement('h4');
+            h.textContent = 'PDF extraction warnings';
+            warn.appendChild(h);
+            const ul = document.createElement('ul');
+            ul.className = 'experiment-tag-list';
+            errs.forEach((e) => {
+                const li = document.createElement('li');
+                li.textContent = `${e.code || '?'}: ${e.error || ''}`;
+                ul.appendChild(li);
+            });
+            warn.appendChild(ul);
+            resEl.appendChild(warn);
+        }
+
+        (data.per_persona || []).forEach((row) => {
+            const block = document.createElement('div');
+            block.className = 'experiment-result-block';
+            const h = document.createElement('h4');
+            h.textContent = `${row.code} — ${row.label || ''}`;
+            block.appendChild(h);
+            if (row.one_line_focus) {
+                const p = document.createElement('p');
+                p.className = 'scout-help-line';
+                p.style.marginBottom = '0.4rem';
+                p.textContent = row.one_line_focus;
+                block.appendChild(p);
+            }
+            const addList = (title, items) => {
+                if (!items || !items.length) return;
+                const sub = document.createElement('p');
+                sub.className = 'scout-help-line';
+                sub.style.marginBottom = '0.25rem';
+                sub.textContent = title;
+                block.appendChild(sub);
+                const ul = document.createElement('ul');
+                ul.className = 'experiment-tag-list';
+                items.forEach((t) => {
+                    const li = document.createElement('li');
+                    li.textContent = t;
+                    ul.appendChild(li);
+                });
+                block.appendChild(ul);
+            };
+            addList('LinkedIn search phrases', row.linkedin_search_phrases);
+            addList('Target role titles', row.target_role_titles);
+            resEl.appendChild(block);
+        });
+
+        const combinedKw = data.combined_top_keywords || [];
+        const combinedFam = data.combined_role_families || [];
+        if (combinedKw.length || combinedFam.length) {
+            const block = document.createElement('div');
+            block.className = 'experiment-result-block';
+            const h = document.createElement('h4');
+            h.textContent = 'Combined (all resumes)';
+            block.appendChild(h);
+            const addList = (title, items) => {
+                if (!items || !items.length) return;
+                const sub = document.createElement('p');
+                sub.className = 'scout-help-line';
+                sub.style.marginBottom = '0.25rem';
+                sub.textContent = title;
+                block.appendChild(sub);
+                const ul = document.createElement('ul');
+                ul.className = 'experiment-tag-list';
+                items.forEach((t) => {
+                    const li = document.createElement('li');
+                    li.textContent = t;
+                    ul.appendChild(li);
+                });
+                block.appendChild(ul);
+            };
+            addList('Top keywords / phrases', combinedKw);
+            addList('Role families', combinedFam);
+            resEl.appendChild(block);
+        }
+
+        if (data.notes) {
+            const block = document.createElement('div');
+            block.className = 'experiment-result-block';
+            const h = document.createElement('h4');
+            h.textContent = 'Notes';
+            block.appendChild(h);
+            const p = document.createElement('p');
+            p.className = 'scout-help-line';
+            p.textContent = data.notes;
+            block.appendChild(p);
+            resEl.appendChild(block);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'experiment-actions';
+        const topPhrase = (combinedKw && combinedKw[0]) || (data.per_persona && data.per_persona[0] && data.per_persona[0].linkedin_search_phrases && data.per_persona[0].linkedin_search_phrases[0]) || '';
+        const aiPrimary = (data.primary_linkedin_search || '').trim();
+        if (!topPhrase && aiPrimary) {
+            const applyPri = document.createElement('button');
+            applyPri.type = 'button';
+            applyPri.className = 'scout-mini-btn';
+            applyPri.textContent = 'Apply AI primary query to scout field';
+            applyPri.addEventListener('click', () => {
+                if (jobScoutKeyword) {
+                    jobScoutKeyword.value = aiPrimary;
+                    saveSession();
+                }
+            });
+            actions.appendChild(applyPri);
+        }
+        if (topPhrase && jobScoutKeyword) {
+            const applyBtn = document.createElement('button');
+            applyBtn.type = 'button';
+            applyBtn.className = 'scout-mini-btn';
+            applyBtn.textContent = 'Apply top phrase to job search field';
+            applyBtn.addEventListener('click', () => {
+                jobScoutKeyword.value = topPhrase;
+                saveSession();
+            });
+            actions.appendChild(applyBtn);
+        }
+        if (actions.childElementCount) resEl.appendChild(actions);
+    };
+
+    const runResumeKeywordExperiment = async () => {
+        if (!resumeKeywordExperimentBtn) return;
+        const st = document.getElementById('resumeKeywordExperimentStatus');
+        const resEl = document.getElementById('resumeKeywordExperimentResults');
+        resumeKeywordExperimentBtn.disabled = true;
+        if (resEl) resEl.classList.add('hidden');
+        if (st) st.textContent = 'Reading PDFs and calling AI (may take 15–60s)...';
+        try {
+            const resp = await fetch('/api/experiment/resume-keywords', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                if (st) st.textContent = data.error || 'Request failed';
+                return;
+            }
+            if (st) {
+                const prov = data.provider ? ` · ${data.provider}` : '';
+                const mod = data.model ? ` / ${data.model}` : '';
+                st.textContent = `Suggestions ready for ${(data.personas_analyzed || []).join(', ')}${prov}${mod}`;
+            }
+            renderResumeKeywordExperimentResults(data);
+        } catch (err) {
+            if (st) st.textContent = `Error: ${err.message}`;
+        } finally {
+            resumeKeywordExperimentBtn.disabled = false;
+        }
+    };
+
+    if (resumeKeywordExperimentBtn) {
+        resumeKeywordExperimentBtn.addEventListener('click', runResumeKeywordExperiment);
     }
 
     const safeCard = (obj, fallbackDetails) => ({

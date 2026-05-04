@@ -43,8 +43,16 @@
                         aria-describedby="jobScoutHelp jobScoutStatus" />
                     <div id="jobScoutHelp" class="scout-help" role="note"></div>
                     <button id="jobScoutBtn" type="button" class="btn-secondary scout-btn">🔭 Scout recent jobs (LinkedIn · optional Greenhouse)</button>
-                    <p id="jobScoutStatus" class="scout-status">Uses your keywords in a LinkedIn jobs search URL; recency window from <code>SCOUT_LINKEDIN_POSTED_SECONDS</code> (<code>f_TPR</code>). Greenhouse runs only if <code>APIFY_ACTOR_GREENHOUSE_JOBS_ID</code> is set.</p>
+                    <p id="jobScoutStatus" class="scout-status">If <code>enable_scout_from_resumes</code> is on in <code>app_settings.json</code>, you can leave keywords empty — Scout reads your resume PDFs, asks the AI for a search phrase, then runs Apify with your time/geo filters (<code>SCOUT_LINKEDIN_POSTED_SECONDS</code> / <code>f_TPR</code>). Or type keywords to override.</p>
                     <div id="jobScoutResults" class="scout-results hidden" aria-live="polite"></div>
+                </div>
+
+                <div id="resumeKeywordExperiment" class="scout-panel experiment-panel hidden">
+                    <h3 class="experiment-heading">Experiment · AI keywords from your resumes</h3>
+                    <p class="scout-help-line">Sends <strong>all</strong> resume PDFs from <code>config/resume_personas.json</code> to your AI provider and suggests LinkedIn search phrases plus target role titles. Turn off anytime: <code>features.enable_resume_keyword_experiment</code> → <code>false</code> in <code>config/app_settings.json</code>, then restart.</p>
+                    <button id="resumeKeywordExperimentBtn" type="button" class="btn-secondary experiment-btn">Suggest keywords &amp; roles from my resumes</button>
+                    <p id="resumeKeywordExperimentStatus" class="scout-status" aria-live="polite"></p>
+                    <div id="resumeKeywordExperimentResults" class="scout-results hidden" aria-live="polite"></div>
                 </div>
 
                 <button id="analyzeBtn" class="btn-primary">Deep Strategic Analysis</button>
