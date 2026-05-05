@@ -3438,13 +3438,15 @@ def discovery():
             "items": result.items,
             "estimated_cost_usd": result.estimated_cost_usd,
         })
+    except ApifyConfigError as err:
+        return jsonify({"error": str(err), "error_type": "apify_config"}), 503
     except ApifySafeStop as safe_stop:
         return jsonify({
             "error": str(safe_stop),
             "error_type": "budget_safe_stop",
             "paused": True,
         }), 429
-    except (ApifyConfigError, Exception) as err:
+    except Exception as err:
         msg, code = _normalize_apify_error(err)
         return jsonify({"error": msg}), code
 
@@ -3476,13 +3478,15 @@ def enrichment():
             "handoff": handoff,
             "estimated_cost_usd": result.estimated_cost_usd,
         })
+    except ApifyConfigError as err:
+        return jsonify({"error": str(err), "error_type": "apify_config"}), 503
     except ApifySafeStop as safe_stop:
         return jsonify({
             "error": str(safe_stop),
             "error_type": "budget_safe_stop",
             "paused": True,
         }), 429
-    except (ApifyConfigError, Exception) as err:
+    except Exception as err:
         msg, code = _normalize_apify_error(err)
         return jsonify({"error": msg}), code
 
@@ -3507,10 +3511,19 @@ def send():
     if not selected_pdf:
         return jsonify({"error": "Invalid resume code"}), 400
         
+    sender_ok = bool((os.getenv("SENDER_EMAIL") or "").strip() and (os.getenv("EMAIL_APP_PASSWORD") or "").strip())
+
     try:
         if schedule_next_day_8am:
             if not ENABLE_EMAIL_SCHEDULING:
                 return jsonify({"error": "Email scheduling is disabled in app_settings.json."}), 400
+            if not sender_ok:
+                return jsonify({
+                    "error": (
+                        "Cannot schedule email: set SENDER_EMAIL and EMAIL_APP_PASSWORD in .env "
+                        "(Gmail App Password). Scheduled sends use the same SMTP credentials."
+                    ),
+                }), 400
             send_at = _next_day_send_time_local()
             _queue_scheduled_email({
                 "id": str(uuid.uuid4()),
@@ -3544,6 +3557,14 @@ def send():
             })
         if not ENABLE_EMAIL_SENDING:
             return jsonify({"error": "Email sending is disabled in app_settings.json. Set features.enable_email_sending=true to enable."}), 400
+        if not sender_ok:
+            return jsonify({
+                "error": (
+                    "Gmail SMTP not configured: set SENDER_EMAIL to your Gmail address and "
+                    "EMAIL_APP_PASSWORD to a Google App Password (not your normal login). "
+                    "See .env.example — then restart the app."
+                ),
+            }), 400
         send_email(to_email=target_email, subject=subject, body=body, attachment_path=selected_pdf)
         log_job(
             company=company,
@@ -3575,6 +3596,9 @@ def app_config():
         (os.getenv("APIFY_ACTOR_GREENHOUSE_JOBS_ID") or "").strip()
         or (os.getenv("APIFY_ACTOR_GREENHOUSE_ID") or "").strip()
     )
+    apify_token = (os.getenv("APIFY_TOKEN") or "").strip()
+    discovery_actor_only = (os.getenv("APIFY_ACTOR_DISCOVERY_ID") or "").strip()
+    enrichment_actor_only = (os.getenv("APIFY_ACTOR_ENRICHMENT_ID") or "").strip()
     return jsonify({
         "ui": {
             "app_title": APP_SETTINGS.ui_text("app_title", "Career Command Center"),
@@ -3616,6 +3640,15 @@ def app_config():
             "linkedin_actor_store_url": "https://apify.com/curious_coder/linkedin-jobs-scraper",
             "linkedin_actor_configured_id": actor_li or None,
             "greenhouse_actor_configured_id": greenhouse_id or None,
+        },
+        # Step 3 optional auto-discovery + enrichment (separate from Step 1 job scout actors).
+        "apify_step3": {
+            "token_configured": bool(apify_token),
+            "discovery_actor_configured": bool(discovery_actor_only),
+            "enrichment_actor_configured": bool(enrichment_actor_only),
+            "discovery_enrichment_ready": bool(
+                apify_token and discovery_actor_only and enrichment_actor_only
+            ),
         },
     })
 

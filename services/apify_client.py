@@ -62,10 +62,9 @@ class ApifyConfig:
 
         if not token:
             raise ApifyConfigError("APIFY_TOKEN is required.")
-        if not discovery_actor_id:
-            raise ApifyConfigError("APIFY_ACTOR_DISCOVERY_ID is required.")
-        if not enrichment_actor_id:
-            raise ApifyConfigError("APIFY_ACTOR_ENRICHMENT_ID is required.")
+        # Discovery / enrichment actors are optional: Step 1 job scout only needs
+        # APIFY_ACTOR_LINKEDIN_JOBS_ID (see app.py). Step 3 calls run_discovery /
+        # run_enrichment only when these are set; see /api/config.apify_step3.
 
         return ApifyConfig(
             token=token,
@@ -118,6 +117,11 @@ class ApifyClientService:
         source_url: str,
         actor_input: Dict[str, Any],
     ) -> ApifyRunResult:
+        if not (self.config.discovery_actor_id or "").strip():
+            raise ApifyConfigError(
+                "Apify Step 3 discovery is not configured: set APIFY_ACTOR_DISCOVERY_ID in .env. "
+                "(This is separate from Step 1 job scout, which uses APIFY_ACTOR_LINKEDIN_JOBS_ID.)"
+            )
         existing = self._find_discovery_record(job_id=job_id, source_url=source_url)
         if existing is not None:
             return ApifyRunResult(
@@ -164,6 +168,10 @@ class ApifyClientService:
         )
 
     def run_enrichment(self, *, actor_input: Dict[str, Any]) -> ApifyRunResult:
+        if not (self.config.enrichment_actor_id or "").strip():
+            raise ApifyConfigError(
+                "Apify enrichment is not configured: set APIFY_ACTOR_ENRICHMENT_ID in .env."
+            )
         estimate = self._estimate_run_cost_usd(actor_input)
         self._guard_budget_or_raise(estimate)
 

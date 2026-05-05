@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
         features: {},
         alumni: { enabled: false, school_slug: '' },
         job_scout: {},
+        apify_step3: {},
     };
 
     const renderJobScoutHelp = () => {
@@ -803,6 +804,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = scoutCacheKey();
         if (key && key === lastScoutKey) return;
 
+        const st3 = APP_CONFIG.apify_step3;
+        if (st3 && !st3.discovery_enrichment_ready) {
+            const missing = [];
+            if (!st3.token_configured) missing.push('APIFY_TOKEN');
+            if (!st3.discovery_actor_configured) missing.push('APIFY_ACTOR_DISCOVERY_ID');
+            if (!st3.enrichment_actor_configured) missing.push('APIFY_ACTOR_ENRICHMENT_ID');
+            setScoutStatus(
+                `Step 3 auto-scout (Apify discovery + enrichment) is off — add ${missing.join(', ')} to .env to enable. ` +
+                'This is separate from Step 1 job scout (APIFY_ACTOR_LINKEDIN_JOBS_ID). ' +
+                'The Drexel / Recruiter / Manager LinkedIn buttons work without it.',
+                'warn',
+            );
+            return;
+        }
+
         const jobId = `job_${Date.now()}`;
         try {
             startScoutProgress('Searching for jobs');
@@ -864,7 +880,16 @@ document.addEventListener('DOMContentLoaded', () => {
             lastScoutKey = key;
             stopScoutProgress('Scout ready: discovery + enrichment completed.', 'ok');
         } catch (error) {
-            stopScoutProgress(`Scout error: ${error.message}`, 'error');
+            const msg = (error && error.message) ? error.message : String(error);
+            const softConfig = /not configured|Apify Step 3 discovery|Apify enrichment is not/i.test(msg);
+            if (softConfig) {
+                setScoutStatus(
+                    `${msg} The LinkedIn shortcut buttons below still work; they do not need these actors.`,
+                    'warn',
+                );
+            } else {
+                stopScoutProgress(`Scout error: ${msg}`, 'error');
+            }
         }
     };
 

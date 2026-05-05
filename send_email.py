@@ -1,4 +1,5 @@
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -8,9 +9,14 @@ from dotenv import load_dotenv
 load_dotenv()
 import argparse
 
+
 def send_email(to_email, subject, body, attachment_path=None):
-    sender_email = os.getenv("SENDER_EMAIL")
-    app_password = os.getenv("EMAIL_APP_PASSWORD")
+    """
+    Send via Gmail SMTP (App Password). Recipients get the message; the sender
+    account should see a copy under Gmail Sent when using these credentials.
+    """
+    sender_email = (os.getenv("SENDER_EMAIL") or "").strip()
+    app_password = (os.getenv("EMAIL_APP_PASSWORD") or "").strip()
 
     if not sender_email or not app_password:
         raise RuntimeError("SENDER_EMAIL or EMAIL_APP_PASSWORD not set in environment.")
@@ -20,7 +26,7 @@ def send_email(to_email, subject, body, attachment_path=None):
     msg['To'] = to_email
     msg['Subject'] = subject
 
-    msg.attach(MIMEText(body, 'plain'))
+    msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
     if attachment_path and os.path.exists(attachment_path):
         with open(attachment_path, "rb") as attachment:
@@ -28,20 +34,31 @@ def send_email(to_email, subject, body, attachment_path=None):
             part.set_payload(attachment.read())
         encoders.encode_base64(part)
         filename = os.path.basename(attachment_path)
-        part.add_header("Content-Disposition", f"attachment; filename= {filename}")
+        part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
         msg.attach(part)
-    try:
-        # Connect to Gmail SMTP server
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(sender_email, app_password)
-        text = msg.as_string()
-        server.sendmail(sender_email, to_email, text)
-        server.quit()
-        print(f"✅ Successfully sent email to {to_email}")
-        return True
-    except Exception as e:
-        raise RuntimeError(f"Failed to send email: {e}") from e
+
+    last_err = None
+    # Try STARTTLS :587 first (most networks); fall back to SSL :465.
+    for use_ssl, port in ((False, 587), (True, 465)):
+        try:
+            if use_ssl:
+                context = ssl.create_default_context()
+                with smtplib.SMTP_SSL('smtp.gmail.com', port, context=context) as server:
+                    server.login(sender_email, app_password)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP('smtp.gmail.com', port) as server:
+                    server.ehlo()
+                    server.starttls(context=ssl.create_default_context())
+                    server.ehlo()
+                    server.login(sender_email, app_password)
+                    server.send_message(msg)
+            print(f"✅ Successfully sent email to {to_email}")
+            return True
+        except Exception as e:
+            last_err = e
+            continue
+    raise RuntimeError(f"Failed to send email (tried SMTP :587 and :465): {last_err}") from last_err
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Send a cold outreach email.")

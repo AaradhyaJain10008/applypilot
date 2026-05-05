@@ -2,11 +2,12 @@
 
 A self-hosted Flask app that:
 
-1. **Analyzes** any job description and gives you a fit score plus a 5-card breakdown (sponsorship, experience, technical, domain, location/pay).
-2. **Recommends** which of *your own* resume variants to send for that job.
-3. **Drafts** a tailored cover letter, LinkedIn connection note, and outreach email — aligned to whichever resume you choose to send.
-4. **Sends** the email immediately or schedules it for the next morning, with a built-in tracker.
-5. **Recalls** prior applications via a follow-up assistant.
+1. **Discovers listings (optional)** — Step 1 **Job scout** calls Apify to pull recent postings from **LinkedIn jobs search** (and optionally **Greenhouse**), ranks them with a fast persona-keyword overlap score, and lets you **Use** one to fill the JD box. Results are cached in your browser session so a refresh does not re-run Apify.
+2. **Analyzes** any job description and gives you a fit score plus a 5-card breakdown (sponsorship, experience, technical, domain, location/pay).
+3. **Recommends** which of *your own* resume variants to send for that job.
+4. **Drafts** a tailored cover letter, LinkedIn connection note, and outreach email — aligned to whichever resume you choose to send.
+5. **Sends** the email immediately or schedules it for the next morning, with a built-in tracker.
+6. **Recalls** prior applications via a follow-up assistant.
 
 It runs locally, calls the AI providers *you* configure (Groq, Cerebras, Gemini, GitHub Models, Ollama — whichever keys you have), and keeps your personal data on your machine.
 
@@ -65,11 +66,21 @@ You can rename / add / remove PDFs — just keep `resume_personas.json` in sync.
 
 ### Job posting scout (optional, Apify)
 
-Step 1 can fetch recent listings from a **LinkedIn jobs search URL** via [Apify](https://apify.com/). This repo is tested with Actor **`curious_coder/linkedin-jobs-scraper`** ([store page](https://apify.com/curious_coder/linkedin-jobs-scraper)): build the search in your browser (keywords, location, date posted), copy the URL pattern, and the app fills `urls` + `count` in the format that Actor expects.
+Step 1 **Job scout** finds postings without opening LinkedIn manually for each role. The backend builds a LinkedIn jobs search URL from your keywords + recency/geo env vars, runs your LinkedIn Apify Actor, optionally merges in a **Greenhouse** Actor run, dedupes by URL, then ranks rows using overlap with `resume_personas.json` triggers/stacks (**not** the same score as Deep Strategic Analysis — hover the % chip for the hint).
 
-- **Keywords** can be typed in Step 1, *or* with **`features.enable_scout_from_resumes`: true** you can leave the field empty and press **Scout** — the app reads your resume PDFs, asks the AI for a **`primary_linkedin_search`** string, then runs Apify (same **`SCOUT_LINKEDIN_POSTED_SECONDS`** / geo filters as always).
-- Optional **Greenhouse** requires a separate board/listing Actor; set `APIFY_ACTOR_GREENHOUSE_JOBS_ID` or leave it unset to skip.
-- See `.env.example` for `SCOUT_*` tuning (recency window, geo, caps).
+**Requirements**
+
+- **`APIFY_TOKEN`** — Apify API token.
+- **`APIFY_ACTOR_LINKEDIN_JOBS_ID`** — LinkedIn jobs Actor (this repo is tested with **`curious_coder/linkedin-jobs-scraper`**, [Apify store](https://apify.com/curious_coder/linkedin-jobs-scraper)). You can instead point **`APIFY_ACTOR_DISCOVERY_ID`** at the same actor ID if you reuse one token slot.
+- Optional **`APIFY_ACTOR_GREENHOUSE_JOBS_ID`** — a Greenhouse board/listing Actor; omit to skip Greenhouse entirely (LinkedIn-only scout still works).
+
+**Behavior**
+
+- Type keywords in Step 1 and click **Scout**, *or* set **`features.enable_scout_from_resumes`: true** in `config/app_settings.json`, leave keywords empty, and press **Scout** — the app reads resume PDFs, asks the AI for a **`primary_linkedin_search`** phrase, then runs Apify with the same **`SCOUT_LINKEDIN_POSTED_SECONDS`** / **`SCOUT_LINKEDIN_GEO_ID`** filters as keyword mode.
+- **`Use`** copies title/company/description into the JD; **`Open`** opens the listing URL.
+- The UI stores the last scout listing list in **`localStorage`** (`ccc_session_v1`) together with the JD and analysis so **refreshing the page does not force another Apify run** for the same session (within the session age window).
+
+**Tuning** — see `.env.example`: **`SCOUT_JOB_MAX_ITEMS`**, **`SCOUT_JOB_KEYWORD_DEFAULT`**, **`APIFY_LINKEDIN_JOBS_INPUT_JSON`**, **`APIFY_GREENHOUSE_JOBS_INPUT_JSON`** (merged into Actor input; keys depend on each Actor’s schema).
 
 ### Experiment: AI keywords from your resumes (optional)
 
@@ -156,7 +167,9 @@ Add as many personas as you have resumes. The triggers control which one the ana
     "enable_followup_agent": true,
     "enable_email_sending": true,
     "enable_email_scheduling": true,
-    "enable_alumni_search_button": false
+    "enable_alumni_search_button": false,
+    "enable_scout_from_resumes": false,
+    "enable_resume_keyword_experiment": false
   },
   "ui": {
     "app_title": "Career Command Center",

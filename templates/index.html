@@ -300,11 +300,11 @@
                     {% if enable_email_scheduling %}
                     <div class="form-group">
                         <label for="scheduleNextMorning" style="display:flex; align-items:center; gap:0.55rem;">
-                            <input type="checkbox" id="scheduleNextMorning" checked />
-                            Schedule send for next day at {{ scheduler_hour_label }}
+                            <input type="checkbox" id="scheduleNextMorning" />
+                            Schedule send for next day at {{ scheduler_hour_label }} (not immediate)
                         </label>
                         <p class="step-hint" style="font-size: 0.8rem; opacity: 0.75; margin-top: 0.3rem;">
-                            Uncheck this only if you want to send immediately right now.
+                            Leave unchecked to send <strong>now</strong> (appears in Gmail Sent). Check only to queue for the next morning — nothing is sent until then.
                         </p>
                     </div>
                     {% endif %}
