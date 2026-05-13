@@ -80,6 +80,8 @@ Cover_Letter_*.docx
 Thumbs.db
 *.swp
 *.swo
+# Cursor MCP: machine-specific Proxima install path (copy from mcp.json.example).
+.cursor/mcp.json
 # Ad-hoc developer scratch scripts (e.g. local model probes). Safe to keep
 # out of the public repo since they often contain provider-specific details.
 test_models.py
